@@ -1,0 +1,624 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orçamentos — protótipo</title>
+<style>
+:root{
+  --bg:#fafafa;--surface:#fff;--sunken:#f4f4f5;--border:#e7e7ea;--text:#18181b;--muted:#71717a;
+  --accent:#4f46e5;--accent-soft:#eef2ff;--accent-ink:#fff;
+  --good:#15803d;--good-soft:#e8f6ec;--bad:#b91c1c;--bad-soft:#fdeceb;--warn:#a16207;--warn-soft:#fdf4dc;
+  --shadow:0 1px 2px #0000000a,0 4px 16px #0000000a;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){
+  --bg:#0b0b0e;--surface:#131318;--sunken:#0f0f13;--border:#25252d;--text:#ececf1;--muted:#8b8b98;
+  --accent:#8b8cf8;--accent-soft:#1d1e3d;--accent-ink:#0b0b0e;
+  --good:#4ade80;--good-soft:#10261a;--bad:#f87171;--bad-soft:#2d1415;--warn:#facc15;--warn-soft:#2b2310;--shadow:0 1px 2px #0006;}}
+:root[data-theme=dark]{
+  --bg:#0b0b0e;--surface:#131318;--sunken:#0f0f13;--border:#25252d;--text:#ececf1;--muted:#8b8b98;
+  --accent:#8b8cf8;--accent-soft:#1d1e3d;--accent-ink:#0b0b0e;
+  --good:#4ade80;--good-soft:#10261a;--bad:#f87171;--bad-soft:#2d1415;--warn:#facc15;--warn-soft:#2b2310;--shadow:0 1px 2px #0006;}
+*{box-sizing:border-box}
+html{color-scheme:light dark}:root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+h2{font-size:22px;margin:0 0 4px;letter-spacing:-.01em}h3{font-size:15px;margin:0}
+p{margin:0}code{font-size:.9em;background:var(--sunken);padding:1px 5px;border-radius:4px}
+.muted{color:var(--muted)}.sm{font-size:12.5px}.num{text-align:right;font-variant-numeric:tabular-nums}
+input,select,button{font:inherit;color:inherit}
+input,select{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px 11px;min-width:0;transition:border-color .12s,box-shadow .12s}
+input:hover,select:hover{border-color:color-mix(in srgb,var(--muted) 50%,var(--border))}
+input:focus,select:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
+input:disabled{background:var(--sunken);color:var(--muted)}
+button{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px 14px;cursor:pointer;transition:background .12s,border-color .12s}
+button:hover:not(:disabled){border-color:var(--muted)}button:disabled{opacity:.5;cursor:default}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:500}
+button.ghost{border-color:transparent;background:transparent;color:var(--muted)}button.ghost:hover{color:var(--text);background:var(--sunken);border-color:transparent}
+
+/* shell */
+.top{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--border)}
+.top-in{max-width:1760px;margin:0 auto;padding:10px 40px;display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+.brand{font-weight:650;letter-spacing:-.01em;cursor:pointer;display:flex;align-items:center;gap:8px}
+.brand i{width:22px;height:22px;border-radius:6px;background:var(--accent);display:inline-block}
+.tabs{display:flex;gap:2px;background:var(--sunken);border:1px solid var(--border);border-radius:10px;padding:3px}
+.tabs button{border:0;background:transparent;padding:5px 12px;border-radius:7px;color:var(--muted)}
+.tabs button.on{background:var(--surface);color:var(--text);box-shadow:var(--shadow)}
+.sp{flex:1}
+.env{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);flex-wrap:wrap}
+.env select{padding:4px 8px;font-size:12.5px}
+main{max-width:1760px;margin:0 auto;padding:32px 40px 140px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:14px}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:2px 10px;border-radius:99px;background:var(--sunken);border:1px solid var(--border);color:var(--muted);white-space:nowrap}
+.pill::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--c,var(--muted))}
+.st-Rascunho{--c:#a1a1aa}.st-Enviado{--c:#3b82f6}.st-Aprovado{--c:#22c55e}.st-Perdido{--c:#ef4444}
+.pagehead{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:20px;flex-wrap:wrap}
+
+/* list */
+.filters{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}.filters input[type=search]{flex:1;min-width:260px}
+table{width:100%;border-collapse:collapse}
+th,td{padding:13px 20px;text-align:left}
+th{font-size:12.5px;font-weight:500;color:var(--muted);cursor:pointer;user-select:none;border-bottom:1px solid var(--border)}
+td{border-bottom:1px solid var(--border)}tr:last-child td{border-bottom:0}
+tr.row{cursor:pointer}tr.row:hover td{background:var(--sunken)}
+.id{color:var(--muted);font-variant-numeric:tabular-nums}
+mark{background:color-mix(in srgb,#facc15 45%,transparent);color:inherit;border-radius:3px}
+.pager{display:flex;justify-content:space-between;align-items:center;padding:10px 20px;border-top:1px solid var(--border)}
+
+/* detail */
+.back{border:0;background:none;color:var(--muted);padding:0;margin-bottom:14px}.back:hover{color:var(--text)}
+.hdr{padding:22px 24px;display:grid;grid-template-columns:repeat(12,1fr);gap:16px}
+.hdr label{display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:var(--muted)}
+.hdr .s5{grid-column:span 5}.hdr .s3{grid-column:span 3}.hdr .s2{grid-column:span 2}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));border-top:1px solid var(--border)}
+.stats>div{padding:16px 24px;border-right:1px solid var(--border)}.stats>div:last-child{border:0}
+.stats small{display:block;color:var(--muted);font-size:12.5px}.stats b{font-size:17px;font-variant-numeric:tabular-nums;font-weight:600}
+.stats .tot b{font-size:24px;color:var(--accent)}
+.flash{animation:fl .9s}@keyframes fl{from{background:color-mix(in srgb,var(--accent) 25%,transparent)}to{background:transparent}}
+.groups{margin-top:20px;display:flex;flex-direction:column;gap:14px}
+.g-head{display:flex;gap:14px;align-items:center;padding:14px 20px;cursor:pointer}
+.chev{color:var(--muted);transition:transform .15s;font-size:10px}.group.open .chev{transform:rotate(90deg)}
+.g-head input{background:transparent;border-color:transparent;padding:4px 8px}.g-head input:hover{border-color:var(--border)}
+.g-head .gn{font-weight:600;width:320px}.g-head .cat{width:170px;color:var(--muted);font-size:13px}
+.g-head .sub{font-weight:600;font-variant-numeric:tabular-nums;min-width:150px;text-align:right}
+.g-body{display:none;border-top:1px solid var(--border)}.group.open .g-body{display:block}
+.it{position:relative;display:grid;grid-template-columns:28px 120px minmax(260px,1fr) 110px 110px 150px 170px 34px;gap:14px;align-items:center;padding:8px 20px;border-bottom:1px solid var(--border)}
+.it.h{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;padding-top:12px;padding-bottom:8px}
+.it .sku{color:var(--muted);font-size:12.5px;font-variant-numeric:tabular-nums}
+.it .drag{cursor:grab;color:var(--border);text-align:center;transition:color .12s}.it:hover .drag{color:var(--muted)}
+.it.dragging{opacity:.35}.it.over{box-shadow:inset 0 2px 0 var(--accent)}
+.it input[type=number]{width:100%;text-align:right;padding:6px 9px}
+.it .x{border:0;background:none;color:var(--muted);padding:2px 4px;opacity:0}.it:hover .x{opacity:1}.it .x:hover{color:var(--bad)}
+.ins{display:none;position:absolute;left:44px;width:22px;height:22px;border-radius:50%;background:var(--accent);color:var(--accent-ink);font-style:normal;font-weight:700;line-height:22px;text-align:center;cursor:pointer;z-index:3;box-shadow:var(--shadow);font-size:15px}
+.ins.up{top:-11px}.ins.dn{bottom:-11px}.it:hover .ins{display:block}.ins:hover{transform:scale(1.15)}
+.add{position:relative;padding:10px 20px;background:var(--sunken)}.add input{width:100%}
+.add:last-child{border-radius:0 0 14px 14px}
+.add.inline{background:var(--accent-soft);border-bottom:1px solid var(--border)}.add.inline .sugg{bottom:auto;top:100%;margin:4px 0 0}
+.sugg{position:absolute;left:20px;right:20px;bottom:100%;margin-bottom:4px;z-index:10;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow),0 12px 32px #0003;max-height:300px;overflow:auto;padding:4px}
+.sugg div{display:flex;justify-content:space-between;gap:12px;padding:8px 12px;border-radius:7px;cursor:pointer}
+.sugg div:hover,.sugg div.sel{background:var(--accent-soft)}.sugg small{color:var(--muted);margin-left:8px}
+.more{padding:12px;text-align:center}
+.skel{height:12px;border-radius:6px;background:linear-gradient(90deg,var(--sunken),var(--border),var(--sunken));background-size:200% 100%;animation:sk 1.1s infinite;margin:14px 20px}
+@keyframes sk{to{background-position:-200% 0}}
+.links{margin-top:20px}
+.links .lh{padding:14px 20px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.links .lr{display:flex;align-items:center;gap:16px;padding:10px 20px;border-bottom:1px solid var(--border)}
+.links .lr:last-child{border-bottom:0}.links .lf{padding:12px 20px;background:var(--sunken);display:flex;gap:10px;align-items:center;border-radius:0 0 14px 14px;flex-wrap:wrap}
+.links select{min-width:360px}
+
+#toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);max-width:min(620px,calc(100vw - 32px));z-index:40;padding:12px 16px;border-radius:12px;background:var(--text);color:var(--bg);box-shadow:var(--shadow),0 12px 32px #0004;opacity:0;pointer-events:none;transition:.2s}
+#toast.show{opacity:1;transform:translate(-50%,0)}#toast.bad{background:var(--bad);color:#fff}#toast.warn{background:var(--warn);color:#fff}
+/* inspector */
+#insp{position:fixed;right:16px;bottom:16px;width:520px;max-width:calc(100vw - 32px);z-index:30;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow),0 12px 32px #0002}
+body[data-view=compare] #insp{display:none}
+#insp .bar{display:flex;gap:8px;align-items:center;padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border)}
+#insp .bar b{flex:1;font-weight:600}#insp .bar button{padding:2px 8px;font-size:11px}
+#insp.min .bar{border-bottom:0}#insp.min .log{display:none}
+#insp .log{height:220px;overflow:auto;padding:6px 12px}
+.log .l{padding:3px 0;border-bottom:1px dashed var(--border);color:var(--muted)}
+.log .hit b{color:var(--good)}.log .miss b{color:var(--warn)}.log .es b{color:var(--accent)}
+
+/* legacy + compare */
+.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+.diag{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--border);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:16px}
+.diag>div{background:var(--surface);padding:10px 16px}.diag small{display:block;color:var(--muted);font-size:11.5px}.diag b{font-variant-numeric:tabular-nums}
+.cmp{width:100%}.cmp th{cursor:default}.cmp td{vertical-align:top}
+.cmp .c-leg{background:color-mix(in srgb,var(--bad-soft) 55%,transparent)}.cmp .c-new{background:color-mix(in srgb,var(--good-soft) 55%,transparent)}
+.cmp .v{font-weight:600;font-variant-numeric:tabular-nums}.cmp .v+.v{margin-top:2px}.cmp .s{font-size:12.5px;color:var(--muted);font-weight:400}
+.bar-t{height:5px;border-radius:99px;background:var(--border);margin-top:6px;overflow:hidden}.bar-t i{display:block;height:100%;border-radius:99px}
+.c-leg .bar-t i{background:var(--bad)}.c-new .bar-t i{background:var(--good)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.flow{padding:18px 22px}.flow h3{margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.flow ol{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:5px}
+.flow.bad{border-color:color-mix(in srgb,var(--bad) 35%,var(--border))}.flow.good{border-color:color-mix(in srgb,var(--good) 35%,var(--border))}
+.issues{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:14px}
+.issue{padding:16px 20px}.issue .t{font-weight:600;margin-bottom:6px}.issue p{font-size:13.5px;color:var(--muted)}.issue p b{color:var(--text);font-weight:500}
+@media (max-width:1100px){.issues{grid-template-columns:1fr 1fr}.it{grid-template-columns:24px 1fr 90px 90px 120px 30px}.it .sku,.it .unit,.it.h>:nth-child(2),.it.h>:nth-child(6){display:none}.hdr{grid-template-columns:repeat(6,1fr)}.hdr .s5,.hdr .s3,.hdr .s2{grid-column:span 3}}
+@media (max-width:700px){main,.top-in{padding-left:16px;padding-right:16px}.grid2,.issues{grid-template-columns:1fr}th:nth-child(n+4),td:nth-child(n+4){display:none}.g-head .cat{display:none}.g-head .gn{width:auto;flex:1}}
+</style>
+</head>
+<body data-view="nova">
+<header class="top"><div class="top-in">
+  <div class="brand" onclick="nav('nova')"><i></i>Orçamentos</div>
+  <nav class="tabs" id="tabs">
+    <button data-v="nova">Nova · Redis + ES</button>
+    <button data-v="legacy">Legada · Razor + jQuery</button>
+    <button data-v="compare">Comparar</button>
+  </nav>
+  <span class="sp"></span>
+  <div class="env" title="Rede e CPU do servidor simuladas; o trabalho no navegador é medido de verdade">
+    <span>Ambiente</span>
+    <select id="envSel"><option value="vps">VPS Contabo · US Central · 4 vCPU / 8 GB</option><option value="local">Dev local (sem rede)</option></select>
+    <span>Usuários simultâneos</span>
+    <select id="usrSel"><option>1</option><option selected>10</option><option>50</option></select>
+    <span class="pill" id="envPill" style="--c:var(--warn)"></span>
+  </div>
+  <button class="ghost" id="themeBtn" title="Alternar tema">◐ Tema</button>
+</div></header>
+<main id="app"></main>
+<div id="toast"></div>
+<div id="insp" class="min"><div class="bar" onclick="toggleInsp(event)"><b>API · inspetor (simulado)</b><span id="cacheInfo" class="muted"></span><button id="clearBtn" onclick="clearCache(event)">Esvaziar Redis</button></div><div class="log" id="log"></div></div>
+
+<script>
+/* ============ utilidades ============ */
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const hl=(s,q)=>{s=esc(s);if(!q)return s;return s.replace(new RegExp('('+q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','ig'),'<mark>$1</mark>')};
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const debounce=(f,ms)=>{let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>f(...a),ms)}};
+const kb=b=>b<1024?Math.round(b)+' B':b<1048576?(b/1024).toFixed(b<10240?1:0)+' KB':(b/1048576).toFixed(1)+' MB';
+const sizeOf=o=>JSON.stringify(o).length;
+let seed=42;const rnd=()=>(seed=(seed*1664525+1013904223)%4294967296)/4294967296;const pick=a=>a[Math.floor(rnd()*a.length)];
+let uid=0;
+
+(function(){const r=document.documentElement;try{const t=localStorage.getItem('theme');if(t)r.dataset.theme=t}catch(e){}
+document.getElementById('themeBtn').onclick=()=>{const dark=r.dataset.theme?r.dataset.theme==='dark':matchMedia('(prefers-color-scheme:dark)').matches;r.dataset.theme=dark?'light':'dark';try{localStorage.setItem('theme',r.dataset.theme)}catch(e){}}})();
+
+/* ============ AMBIENTE SIMULADO ============
+   Cliente no Brasil → VPS Contabo em St. Louis (US Central): RTT ~175 ms, vazão efetiva ~30 Mbps,
+   4 vCPU compartilhadas / 8 GB. Texto (JSON/HTML) trafega com gzip (~5×).
+   tempo = RTT + jitter + bytes/vazão + CPU do servidor × fila. O que o NAVEGADOR faz é medido de verdade. */
+const ENVS={vps:{rtt:175,jit:25,mbps:30,cpu:1,cores:4,label:'RTT ~175 ms · 30 Mbps · 4 vCPU'},local:{rtt:2,jit:1,mbps:1000,cpu:.5,cores:8,label:'RTT ~2 ms · rede local'}};
+const ENV={key:'vps',users:10};
+const queueF=()=>{const e=ENVS[ENV.key],sat=ENV.users/e.cores;return sat<=1?1:1+(sat-1)*.35};
+const netTime=({up=0,down=0,srv=0},jitter=true)=>{const e=ENVS[ENV.key];return Math.max(1,e.rtt+(jitter?(Math.random()-.5)*2*e.jit:0))+((up+down)/5)*8/(e.mbps*1000)+srv*e.cpu*queueF()};
+const net=async o=>{const t=netTime(o);await sleep(Math.min(t,5000));return Math.round(t)};
+const srvMs=ms=>Math.round(ms*ENVS[ENV.key].cpu*queueF());
+function paintEnv(){const e=ENVS[ENV.key];document.getElementById('envPill').textContent=e.label+(ENV.users>e.cores?` · fila ×${queueF().toFixed(1)}`:'')}
+document.getElementById('envSel').onchange=e=>{ENV.key=e.target.value;paintEnv();log(`ambiente → ${ENVS[ENV.key].label}`)};
+document.getElementById('usrSel').onchange=e=>{ENV.users=+e.target.value;paintEnv();log(`usuários simultâneos → ${ENV.users}`)};
+paintEnv();
+
+/* ============ DINHEIRO ============
+   NOVA (correta): NENHUM float. Valores em centavos INTEIROS (×100), percentuais em pontos-base INTEIROS (×100, ex.: 5,5% = 550).
+         Soma, subtração e preço × quantidade são exatas. Só há arredondamento onde há DIVISÃO (aplicar percentual), com UMA regra
+         padrão (arredondamento comercial: meio centavo para cima), igual no front e no back. Divide por 100 só para exibir, por quociente
+         e resto. Entrada digitada é convertida por texto, não por parseFloat. Não precisa de ceil: não há divergência a compensar.
+   LEGADA (o erro + o paliativo): float no JS do navegador × decimal no C#. Paliativo adotado na época, com aval do cliente:
+         arredondar SEMPRE para cima (ceil) em todo cálculo, nos dois lados, para que o erro fosse sempre a favor da empresa.
+         Em float o ceil ainda falha: 1.1*100 = 110.00000000000001 → ceil = 111. */
+const ceilDiv=(a,b)=>Math.floor((a+b-1)/b);              // a ≥ 0: divisão inteira arredondando para cima (C# decimal + Math.Ceiling, legada)
+const roundDiv=(a,b)=>Math.floor((2*a+b)/(2*b));          // a ≥ 0: divisão inteira, arredondamento comercial (meio para cima) — NOVA
+const ceilF=x=>Math.ceil(x*100)/100;                      // paliativo da legada no navegador: ceil sobre float
+const fmtC=c=>{const neg=c<0;c=Math.abs(c);return(neg?'-':'')+'R$ '+Math.floor(c/100).toLocaleString('pt-BR')+','+String(c%100).padStart(2,'0')};       // centavos → "R$ 1.234,56" sem float
+const brlC=fmtC;
+const brl=n=>n.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});                                                                               // só para a LEGADA (float)
+const toInt=(str,scale=2)=>{let s=String(str).trim().replace(',','.');const neg=s[0]==='-';if(neg)s=s.slice(1);const[i='0',f='']=s.split('.');const v=parseInt(i||'0',10)*10**scale+parseInt((f+'0'.repeat(scale)).slice(0,scale)||'0',10);return neg?-v:v}; // "5,5" → 550
+const fmtScaled=(v,scale=2)=>{const neg=v<0;v=Math.abs(v);const p=10**scale,i=Math.floor(v/p),f=String(v%p).padStart(scale,'0').replace(/0+$/,'');return(neg?'-':'')+i+(f?'.'+f:'')}; // 550 → "5.5"
+const pctTxt=bp=>fmtScaled(bp).replace('.',',')+'%';
+const itemNewC=it=>roundDiv(it.priceC*it.qty*(10000-it.discBp),10000);
+const itemDecC=it=>ceilDiv(it.priceC*it.qty*(10000-it.discBp),10000);       // C#: decimal + ceil por linha (paliativo, simulado)
+const itemF=it=>ceilF(it.price*it.qty*(1-it.disc/100));                     // JS da legada: float + ceil por linha (paliativo)
+const toLegacy=it=>({id:it.id,sku:it.sku,name:it.name,price:it.priceC/100,qty:it.qty,disc:it.discBp/100});
+const fromLegacy=x=>({id:x.id,sku:x.sku,name:x.name,priceC:Math.round(x.price*100),qty:x.qty,discBp:Math.round(x.disc*100)});
+const parseBRL=t=>parseFloat(t.replace(/[^\d,]/g,'').replace(',','.'));
+
+/* ============ catálogo e dados fake ============ */
+const BASES=['Cabo HDMI','Switch Gigabit','Access Point Wi-Fi 6','Câmera IP','Nobreak','Rack','Patch Panel','Cabo UTP Cat6','Servidor Torre','Notebook','Monitor','Teclado','Mouse','HD Externo','SSD NVMe','Roteador','Firewall','Fonte ATX','Tomada Industrial','Eletroduto','Luminária LED','Quadro de Comando','Disjuntor','Sensor de Presença'];
+const VARS=['Básico','Pro','Plus','Industrial','Compacto'];
+const CATALOG=[];let sku=1000;BASES.forEach(b=>VARS.forEach(v=>CATALOG.push({sku:'SKU-'+(sku++),name:`${b} ${v}`,priceC:2000+Math.floor(rnd()*240000)})));
+const CLIENTS=['Acme Ltda','Construtora Horizonte','Hospital São Lucas','Escola Aurora','Rede Mercado Bom','TechNova S.A.','Cooperativa Vale','Clínica Vida'];
+const SELLERS=['Marina Costa','Rafael Lima','Camila Souza','Bruno Alves'];
+const STATUS=['Rascunho','Enviado','Aprovado','Perdido'];
+const GNAMES=[['Infraestrutura de rede','Rede'],['Cabeamento','Infra'],['Equipamentos de TI','Hardware'],['Elétrica','Elétrica'],['Segurança / CFTV','Segurança'],['Mão de obra','Serviços']];
+const genItems=(n,salt=0)=>Array.from({length:n},(_,k)=>{const p=CATALOG[(k*7+salt)%CATALOG.length];return{id:'i'+k,sku:p.sku,name:p.name,priceC:p.priceC,qty:1+((k*5+salt)%6),discBp:[0,0,500,1000][(k+salt)%4]}});
+const recompute=g=>{g.subC=g.items.reduce((s,i)=>s+itemNewC(i),0);g.subD=g.items.reduce((s,i)=>s+itemDecC(i),0)};
+
+const DB={budgets:[]};
+for(let i=0;i<46;i++){
+  const ng=i===0?4:2+Math.floor(rnd()*3),groups=[];
+  for(let g=0;g<ng;g++){const n=GNAMES[(i+g)%GNAMES.length];
+    const count=i===0?[14,120,3000,38][g]:(rnd()<.2?200+Math.floor(rnd()*400):5+Math.floor(rnd()*30));
+    const g0={id:`g${i}-${g}`,name:n[0],category:n[1],count,items:null,subC:0,subD:0,ver:0,salt:1042+i+g};
+    const its=genItems(count,g0.salt);g0.subC=its.reduce((s,x)=>s+itemNewC(x),0);g0.subD=its.reduce((s,x)=>s+itemDecC(x),0);groups.push(g0)}
+  DB.budgets.push({id:1042+i,description:i===0?'Reforma datacenter — Hospital São Lucas':pick(['Reforma datacenter','Cabeamento estruturado','Retrofit elétrico','Projeto CFTV','Expansão filial','Laboratório de informática','Migração de rede'])+' — '+pick(CLIENTS),
+    client:i===0?'Hospital São Lucas':pick(CLIENTS),seller:pick(SELLERS),status:i===0?'Rascunho':pick(STATUS),prazoBp:pick([0,250,500,800]),margemBp:pick([1000,1500,2000,2500]),groups,children:[],parentId:null});
+}
+const budget=id=>DB.budgets.find(b=>b.id===id);
+[[1042,1043],[1042,1044],[1048,1049]].forEach(([p,c])=>{budget(p).children.push(c);budget(c).parentId=p});
+const gOf=(bid,gid)=>budget(bid).groups.find(x=>x.id===gid);
+
+/* Orçamento dentro de orçamento: profundidade máxima 1 */
+function linkError(pid,cid){const p=budget(pid),c=budget(cid);
+  if(pid===cid)return 'Um orçamento não pode conter a si mesmo.';
+  if(p.parentId)return `#${pid} já está dentro de #${p.parentId}. A profundidade máxima é 1 nível.`;
+  if(c.children.length)return `#${cid} já contém outros orçamentos. A profundidade máxima é 1 nível.`;
+  if(c.parentId)return `#${cid} já está dentro de #${c.parentId}.`;
+  return null}
+/* total = (Σ subtotais dos grupos + Σ totais dos filhos) → ×(1+prazo) → ×(1+margem); NOVA: inteiros + arredondamento comercial; LEGADA (servidor): decimal + ceil */
+function calcNew(b){const own=b.groups.reduce((s,g)=>s+g.subC,0),kids=b.children.reduce((s,id)=>s+calcNew(budget(id)).total,0),sub=own+kids,ap=roundDiv(sub*(10000+b.prazoBp),10000),total=roundDiv(ap*(10000+b.margemBp),10000);return{own,kids,sub,ap,total}}
+function calcDec(b){const own=b.groups.reduce((s,g)=>s+g.subD,0),kids=b.children.reduce((s,id)=>s+calcDec(budget(id)).total,0),sub=own+kids,ap=ceilDiv(sub*(10000+b.prazoBp),10000),total=ceilDiv(ap*(10000+b.margemBp),10000);return{own,kids,sub,ap,total}}
+const kidsNew=b=>b.children.map(id=>({id,description:budget(id).description,totalC:calcNew(budget(id)).total}));
+const kidsDec=b=>b.children.map(id=>({id,description:budget(id).description,totF:calcDec(budget(id)).total/100}));
+
+/* ============ "BACK-END" SIMULADO ============ */
+const redis=new Set(),ck=(b,g)=>`budget:${b}:group:${g}`;
+function log(html,cls=''){const el=document.getElementById('log');const d=document.createElement('div');d.className='l '+cls;d.innerHTML=html;el.prepend(d);document.getElementById('cacheInfo').textContent=`${redis.size} chaves`}
+function clearCache(e){e&&e.stopPropagation();if(document.body.dataset.view==='legacy'){try{Object.keys(localStorage).filter(k=>k.startsWith('legacy:')).forEach(k=>localStorage.removeItem(k))}catch(x){}log('<b>localStorage</b> legacy:* removido → próxima abertura de grupo vai ao SQL','miss');return}redis.clear();log('<b>FLUSH</b> redis → próxima abertura volta ao Postgres','miss');document.getElementById('cacheInfo').textContent='0 chaves'}
+function toggleInsp(e){if(e.target.tagName==='BUTTON')return;document.getElementById('insp').classList.toggle('min')}
+const tag=(c,t)=>`<span class="${c}"><b>${t}</b></span>`;
+const toast=(msg,kind='')=>{const t=document.getElementById('toast');t.textContent=msg;t.className='show '+kind;clearTimeout(toast.t);toast.t=setTimeout(()=>t.className='',6500)};
+const res=(b,x={})=>({calc:calcNew(b),kids:kidsNew(b),...x});
+const rowHtmlLen=730;/* ~bytes de HTML por linha que o Razor devolveria (inputs + atributos) */
+
+const api={
+  async search({q,status,seller,sort,dir,page},legacy){
+    const lat=await net({down:3000,srv:legacy?90:12});
+    let r=DB.budgets.filter(b=>(!status||b.status===status)&&(!seller||b.seller===seller));
+    if(q){const x=q.toLowerCase();r=r.filter(b=>(b.description+' '+b.client+' '+b.id+' '+b.seller).toLowerCase().includes(x))}
+    r=r.map(b=>({id:b.id,description:b.description,seller:b.seller,status:b.status,total:(legacy?calcDec(b):calcNew(b)).total,parentId:b.parentId,kids:b.children.length,lockedBy:legacy&&LOCKS.get(b.id)?LOCKS.get(b.id).user:null})).sort((a,b)=>(a[sort]>b[sort]?1:-1)*(dir==='asc'?1:-1));
+    log(legacy?`GET /Orcamento?q=${esc(q||'')} ${tag('miss',"SQL LIKE '%q%'")} → ${r.length} linhas · ${lat}ms`:`GET /budgets?q=${esc(q||'')} ${tag('es','Elasticsearch')} → ${r.length} hits · ${lat}ms`,legacy?'miss':'es');
+    return{items:r.slice((page-1)*10,page*10),total:r.length,ms:lat}},
+  async getBudget(id){const hit=redis.has(`budget:${id}:summary`),b=budget(id);redis.add(`budget:${id}:summary`);
+    const lat=await net({down:2500,srv:hit?2:35});
+    log(`GET /budgets/${id} → header + ${b.groups.length} grupos + ${b.children.length} vinculados, sem itens · ${hit?tag('hit','Redis HIT'):tag('miss','Postgres MISS')} · ${lat}ms`,hit?'hit':'miss');
+    return res(b,{...b,lat,groups:b.groups.map(g=>({id:g.id,name:g.name,category:g.category,count:g.count,subC:g.subC}))})},
+  async getGroup(bid,gid,page){const g=gOf(bid,gid),hit=redis.has(ck(bid,gid));if(!g.items)g.items=genItems(g.count,g.salt);redis.add(ck(bid,gid));
+    const out=g.items.slice((page-1)*25,page*25).map(i=>({...i}));const lat=await net({down:sizeOf(out),srv:hit?2:25+out.length*.05});
+    log(`GET /groups/${gid}?page=${page} → ${out.length}/${g.count} itens · ${hit?tag('hit','Redis HIT'):tag('miss','Postgres MISS')} · ${lat}ms`,hit?'hit':'miss');
+    return{items:out,total:g.count,ver:g.ver,lat,payload:sizeOf(out)}},
+  async patchHeader(bid,patch){const b=budget(bid);Object.assign(b,patch);const lat=await net({up:150,down:400,srv:4});
+    log(`PATCH /budgets/${bid} ${esc(JSON.stringify(patch))} → recalcula com ${b.groups.length} subtotais + ${b.children.length} filhos (0 itens lidos) · ${lat}ms`);return res(b,{lat,payload:sizeOf(patch)+150})},
+  async patchGroup(bid,gid,patch){Object.assign(gOf(bid,gid),patch);redis.delete(`budget:${bid}:summary`);const lat=await net({up:100,srv:3});log(`PATCH /groups/${gid} ${esc(JSON.stringify(patch))} → invalida só o summary · ${lat}ms`)},
+  _stale(g,ver){if(ver===g.ver)return false;log(`${tag('miss','409 Conflict')} grupo ${g.id}: cliente na v${ver}, servidor na v${g.ver} → write rejeitado`,'miss');return true},
+  async patchItem(bid,gid,iid,patch,ver){const b=budget(bid),g=gOf(bid,gid);const lat=await net({up:sizeOf(patch)+150,down:500,srv:4});if(this._stale(g,ver))return{conflict:true};
+    const it=g.items.find(i=>i.id===iid),bn=itemNewC(it),bd=itemDecC(it);Object.assign(it,patch);g.subC+=itemNewC(it)-bn;g.subD+=itemDecC(it)-bd;g.ver++;
+    log(`PATCH /items/${iid} ${esc(JSON.stringify(patch))} → Δ ${fmtC(itemNewC(it)-bn)} no subtotal (inteiro) sem varrer ${g.count} itens · If-Match v${ver} · ${lat}ms`);
+    return res(b,{ver:g.ver,subC:g.subC,lat,payload:sizeOf(patch)+150,itemC:itemNewC(it)})},
+  async addItem(bid,gid,p,ver,refId,where){const b=budget(bid),g=gOf(bid,gid);const lat=await net({up:200,down:600,srv:5});if(this._stale(g,ver))return{conflict:true};
+    const it={id:`n${++uid}`,sku:p.sku,name:p.name,priceC:p.priceC,qty:1,discBp:0};let idx=refId?g.items.findIndex(x=>x.id===refId)+(where==='before'?0:1):g.items.length;if(idx<0)idx=g.items.length;
+    g.items.splice(idx,0,it);g.count++;g.subC+=itemNewC(it);g.subD+=itemDecC(it);g.ver++;
+    log(`POST /groups/${gid}/items {${p.sku}, ${where||'end'} ${refId||''}} → posição por índice fracionário, Δ +${fmtC(itemNewC(it))} · ${lat}ms`);return res(b,{item:{...it},subC:g.subC,count:g.count,ver:g.ver,lat,payload:200})},
+  async delItem(bid,gid,iid,ver){const b=budget(bid),g=gOf(bid,gid);const lat=await net({up:100,down:500,srv:4});if(this._stale(g,ver))return{conflict:true};
+    const i=g.items.findIndex(x=>x.id===iid),it=g.items[i];g.items.splice(i,1);g.count--;g.subC-=itemNewC(it);g.subD-=itemDecC(it);g.ver++;
+    log(`DELETE /items/${iid} → Δ −${fmtC(itemNewC(it))} · ${lat}ms`);return res(b,{subC:g.subC,count:g.count,ver:g.ver,lat,payload:100})},
+  async reorder(bid,gid,movedId,afterId,ver){const g=gOf(bid,gid);const lat=await net({up:120,down:100,srv:3});if(this._stale(g,ver))return{conflict:true};g.ver++;
+    log(`PUT /items/${movedId}/position {after:${afterId||'∅'}} → só a posição do item muda (índice fracionário), totais intactos · ${lat}ms`);return{ver:g.ver,lat,payload:120}},
+  async catalog(q,legacy){const lat=await net({down:900,srv:legacy?60:10});const w=q.toLowerCase().split(/\s+/).filter(Boolean);
+    const r=CATALOG.filter(p=>w.every(x=>p.name.toLowerCase().includes(x)||p.sku.toLowerCase().includes(x))).slice(0,8);
+    log(`GET /catalog/suggest?q=${esc(q)} ${legacy?tag('miss','SQL LIKE'):tag('es','Elasticsearch')} → ${r.length} · ${lat}ms`,legacy?'miss':'es');return r},
+  async link(pid,cid){const lat=await net({up:150,down:500,srv:6});const err=linkError(pid,cid);if(err){log(`${tag('miss','422')} POST /budgets/${pid}/children → ${esc(err)}`,'miss');return{error:err}}
+    budget(pid).children.push(cid);budget(cid).parentId=pid;log(`POST /budgets/${pid}/children {${cid}} → pai recalcula somando o total do filho · ${lat}ms`);return res(budget(pid),{lat,payload:150})},
+  async unlink(pid,cid){const lat=await net({up:100,down:500,srv:5});const p=budget(pid);p.children=p.children.filter(x=>x!==cid);budget(cid).parentId=null;log(`DELETE /budgets/${pid}/children/${cid} · ${lat}ms`);return res(p,{lat,payload:100})},
+  otherUser(bid,gid){const g=gOf(bid,gid);if(!g.items)g.items=genItems(g.count,g.salt);const it=g.items[0],before=it.priceC;it.priceC=roundDiv(before*120,100);recompute(g);g.ver++;
+    log(`(outro usuário) ${esc(it.name)}: ${fmtC(before)} → ${fmtC(it.priceC)} · grupo ${g.id} agora na v${g.ver}`);return{before,after:it.priceC,name:it.name,ver:g.ver}},
+  otherUserChild(cid){const c=budget(cid),r=this.otherUser(cid,c.groups[0].id);log(`(outro usuário) editou o filho #${cid}; o total do pai muda sem o pai ser tocado`);return r}
+};
+/* servidor legado (como era):
+   - abrir um orçamento marca "aberto" no banco e bloqueia OUTROS usuários (o mesmo usuário em outra aba passa);
+   - abrir um grupo devolve o grupo INTEIRO (HTML do Razor);
+   - salvar envia o orçamento INTEIRO (cabeçalho, todos os grupos, todos os itens), sem versão. */
+const LOCKS=new Map([[1086,{user:'Marina Costa',since:'08:47'}],[1082,{user:'Bruno Alves',since:'10:02'}]]);
+const ME='Você';
+const avgItemJson=sizeOf(toLegacy(genItems(1)[0]));
+let legacyOpenId=null;
+const legacySrv={
+  async lock(id){const lat=await net({up:100,down:200,srv:8});const l=LOCKS.get(id);
+    if(l&&l.user!==ME){log(`GET /Orcamento/Editar/${id} ${tag('miss','bloqueado')} → aberto por ${esc(l.user)} desde ${l.since} · ${lat}ms`,'miss');return{locked:l,lat}}
+    const now=new Date(),since=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
+    if(!l)LOCKS.set(id,{user:ME,since});log(`UPDATE Orcamento SET Aberto = 1, AbertoPor = '${ME}' WHERE Id = ${id}${l?' (já aberto por você: outra aba passa direto)':''}`,'miss');return{lat}},
+  release(id){const l=LOCKS.get(id);if(l&&l.user===ME){LOCKS.delete(id);log(`UPDATE Orcamento SET Aberto = 0 WHERE Id = ${id} (saiu da tela)`,'miss')}},
+  tryOpenAsOther(id,user){const l=LOCKS.get(id);log(`(${esc(user)}) GET /Orcamento/Editar/${id} ${tag('miss','bloqueado')} → aberto por ${esc(l?l.user:'?')}`,'miss');return l},
+  async saveAll(bid,loaded,header,tabRev){const b=budget(bid);
+    const rows=b.groups.reduce((s,g)=>s+(loaded[g.id]?loaded[g.id].length:g.count),0);
+    const pl=sizeOf(header)+Object.values(loaded).reduce((s,d)=>s+sizeOf(d),0)+b.groups.filter(g=>!loaded[g.id]).reduce((s,g)=>s+g.count*avgItemJson,0);
+    const lat=await net({up:pl,down:300,srv:15+.1*rows});
+    let overwritten=null;if(b.lrev!==tabRev&&b.pendingOther&&loaded[b.pendingOther.gid])overwritten=b.pendingOther;
+    Object.assign(b,header);Object.entries(loaded).forEach(([gid,d])=>{const g=gOf(bid,gid);g.items=d.map(fromLegacy);g.count=d.length;recompute(g);g.ver++});
+    b.lrev=(b.lrev||0)+1;b.pendingOther=null;
+    return{serverTotalC:calcDec(b).total,overwritten,lat,payload:pl,rows,groups:b.groups.length,rev:b.lrev}},
+  otherTab(bid,gid){const b=budget(bid),g=gOf(bid,gid);if(!g.items)g.items=genItems(g.count,g.salt);const it=g.items[0],from=it.qty;it.qty=from+3;recompute(g);g.ver++;
+    b.lrev=(b.lrev||0)+1;b.pendingOther={gid,name:it.name,from,to:it.qty};
+    log(`(outra aba sua) POST /Orcamento/Salvar → orçamento inteiro; “${esc(it.name)}” qtd ${from} → ${it.qty}`,'miss');return b.pendingOther},
+  async open(bid,g){const k='legacy:g:'+g.id;let c=null;try{c=JSON.parse(localStorage.getItem(k))}catch(e){}
+    if(c)return{items:c,hit:true,lat:5,payload:0};
+    const d=gOf(bid,g.id);if(!d.items)d.items=genItems(d.count,d.salt);const bytes=d.count*rowHtmlLen;const lat=await net({down:bytes,srv:25+.12*d.count});
+    return{items:d.items.map(toLegacy),hit:false,lat,payload:bytes}},
+  async getBudget(id){const lk=await this.lock(id);if(lk.locked)return{locked:lk.locked};const b=budget(id);const lat=await net({down:9000,srv:60});log(`GET /Orcamento/Editar/${id} ${tag('miss','SQL')} → header + títulos/valores dos grupos + filhos · ${lat}ms`,'miss');
+    return{...b,lat,rev:b.lrev||0,serverTotalC:calcDec(b).total,kids:kidsDec(b),groups:b.groups.map(g=>({id:g.id,name:g.name,category:g.category,count:g.count,subF:g.subD/100}))}},
+  async link(pid,cid){const lat=await net({up:250,down:300,srv:25});budget(pid).children.push(cid);budget(cid).parentId=pid;return{serverTotalC:calcDec(budget(pid)).total,kids:kidsDec(budget(pid)),lat}},
+  async unlink(pid,cid){const lat=await net({up:250,down:300,srv:25});const p=budget(pid);p.children=p.children.filter(x=>x!==cid);budget(cid).parentId=null;return{serverTotalC:calcDec(p).total,kids:kidsDec(p),lat}}
+};
+
+/* ============ roteamento ============ */
+const app=document.getElementById('app');
+const isLegacy=()=>document.body.dataset.view==='legacy';
+function nav(v,id){const h=v==='nova'?'#/':v==='legacy'?'#/legacy':v==='compare'?'#/compare':(isLegacy()?`#/legacy/b/${id}`:`#/b/${id}`);if(location.hash===h)route();else location.hash=h}
+window.addEventListener('hashchange',route);
+function route(){const h=location.hash,L=h.startsWith('#/legacy'),C=h.startsWith('#/compare');let m;
+  if(legacyOpenId&&h!==`#/legacy/b/${legacyOpenId}`){legacySrv.release(legacyOpenId);legacyOpenId=null}
+  document.body.dataset.view=C?'compare':L?'legacy':'nova';
+  document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.v===document.body.dataset.view));
+  document.getElementById('clearBtn').textContent=L?'Limpar localStorage':'Esvaziar Redis';
+  if(C)renderCompare();else if(m=h.match(/^#\/(?:legacy\/)?b\/(\d+)/))renderDetail(+m[1],L?'legacy':'new');else renderList(L?'legacy':'new')}
+document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>nav(b.dataset.v));
+
+/* ============ listagem ============ */
+const LS={q:'',status:'',seller:'',sort:'id',dir:'desc',page:1};
+function renderList(mode='new'){
+  const L=mode==='legacy';
+  app.innerHTML=`<div class="pagehead"><div><h2>Orçamentos ${L?'<span class="pill" style="--c:var(--warn)">legada · simulada</span>':''}</h2><p class="muted" id="meta">…</p></div><button class="primary" onclick="alert('POST /budgets — fora do escopo do protótipo')">Novo orçamento</button></div>
+  <div class="filters"><input type="search" id="q" placeholder="Buscar por id, descrição, cliente ou vendedor" value="${esc(LS.q)}">
+  <select id="fs"><option value="">Todos os status</option>${STATUS.map(s=>`<option ${LS.status===s?'selected':''}>${s}</option>`).join('')}</select>
+  <select id="fv"><option value="">Todos os vendedores</option>${SELLERS.map(s=>`<option ${LS.seller===s?'selected':''}>${s}</option>`).join('')}</select></div>
+  <div class="card"><table><thead><tr>${[['id','ID'],['description','Descrição'],['seller','Vendedor'],['total','Valor'],['status','Status']].map(([k,l])=>`<th data-k="${k}" class="${k==='total'?'num':''}">${l}${LS.sort===k?(LS.dir==='asc'?' ↑':' ↓'):''}</th>`).join('')}</tr></thead><tbody id="tb"></tbody></table><div class="pager" id="pg"></div></div>`;
+  const load=async()=>{const r=await api.search(LS,L);
+    document.getElementById('meta').textContent=`${r.total} orçamentos · busca em ${r.ms}ms (${L?'SQL LIKE':'Elasticsearch'}, rede e servidor simulados)`;
+    document.getElementById('tb').innerHTML=r.items.map(b=>`<tr class="row" onclick="nav('detail',${b.id})"><td class="id">#${b.id}</td><td>${hl(b.description,LS.q)} ${b.parentId?`<span class="pill" style="--c:var(--accent)">dentro de #${b.parentId}</span>`:''}${b.kids?`<span class="pill" style="--c:var(--accent)">contém ${b.kids}</span>`:''}${b.lockedBy?`<span class="pill" style="--c:var(--warn)">aberto por ${esc(b.lockedBy)}</span>`:''}</td><td>${hl(b.seller,LS.q)}</td><td class="num">${L?brl(b.total/100):fmtC(b.total)}</td><td><span class="pill st-${b.status}">${b.status}</span></td></tr>`).join('')||'<tr><td colspan=5 class="muted">Nenhum resultado.</td></tr>';
+    const pages=Math.max(1,Math.ceil(r.total/10));
+    document.getElementById('pg').innerHTML=`<span class="muted sm">Página ${LS.page} de ${pages}</span><span><button id="pp" ${LS.page<=1?'disabled':''}>←</button> <button id="pn" ${LS.page>=pages?'disabled':''}>→</button></span>`;
+    document.getElementById('pp').onclick=()=>{LS.page--;load()};document.getElementById('pn').onclick=()=>{LS.page++;load()}};
+  document.getElementById('q').oninput=debounce(e=>{LS.q=e.target.value;LS.page=1;load()},250);
+  document.getElementById('fs').onchange=e=>{LS.status=e.target.value;LS.page=1;load()};
+  document.getElementById('fv').onchange=e=>{LS.seller=e.target.value;LS.page=1;load()};
+  document.querySelectorAll('th').forEach(th=>th.onclick=()=>{const k=th.dataset.k;LS.dir=LS.sort===k&&LS.dir==='asc'?'desc':'asc';LS.sort=k;renderList(mode)});
+  load();
+}
+
+/* ============ detalhe · mesma tela, dois motores ============
+   'new'    → cliente só exibe; servidor calcula (inteiros, arredondamento comercial); PATCH com delta; itens paginados; versão otimista.
+   'legacy' → bloqueio "aberto" no banco; todos os itens no DOM; jQuery-style lê/recalcula TUDO em float; localStorage; POST do orçamento inteiro.
+   "Cliente" é medido (performance.now). "Rede + servidor" é simulado pelo ambiente escolhido no topo. */
+async function renderDetail(id,mode='new'){
+  const L=mode==='legacy';
+  app.innerHTML='<div class="skel"></div><div class="skel"></div><div class="skel"></div>';
+  const B=await(L?legacySrv.getBudget(id):api.getBudget(id));
+  if(B.locked){app.innerHTML=`<button class="back" onclick="nav('legacy')">← Orçamentos</button>
+    <div class="card" style="padding:28px 32px;max-width:640px"><h2>Orçamento #${id} bloqueado</h2><p class="muted" style="margin:8px 0 16px">Está aberto por <b style="color:var(--text)">${esc(B.locked.user)}</b> desde ${B.locked.since}. No sistema antigo, abrir um orçamento o marcava como “aberto” no banco, e ninguém mais conseguia abri-lo até ser liberado.</p><button onclick="nav('legacy')">Voltar</button></div>`;return}
+  if(L)legacyOpenId=id;
+  app.innerHTML=`<button class="back" onclick="nav('${L?'legacy':'nova'}')">← Orçamentos</button>
+  <div class="pagehead"><div><h2>Orçamento #${B.id}${L?' <span class="pill" style="--c:var(--warn)">aberto por você · bloqueado para outros</span>':''}</h2><p class="muted">${L?'Arquitetura antiga (simulada): ao abrir um grupo vêm todos os itens, cada alteração recalcula tudo no navegador e salvar envia o orçamento inteiro.':'Só o cabeçalho e o resumo dos grupos foram carregados. Os itens vêm ao abrir cada grupo.'}</p></div>
+  <div class="toolbar"><div class="tabs" id="modesw"><button data-m="new" class="${L?'':'on'}">Nova</button><button data-m="legacy" class="${L?'on':''}">Legada</button></div>${L?'<button id="other" title="Você abre o mesmo orçamento em outra aba e salva uma alteração lá">Simular outra aba</button><button id="other2" title="Outro usuário tenta abrir este orçamento">Simular outro usuário abrindo</button>':'<button id="other" title="Outra aba ou outro usuário altera um preço no servidor">Simular outra aba ou usuário</button>'}</div></div>
+  <div class="diag" id="mx">${['Última ação','Cliente (medido)','Rede + servidor (simulado)','Tela atualiza em','Itens tocados','Payload','Nós no DOM'].map(x=>`<div><small>${x}</small><b>—</b></div>`).join('')}</div>
+  <div class="card"><div class="hdr">
+    <label class="s5">Descrição<input id="h-desc" value="${esc(B.description)}"></label>
+    <label class="s3">Cliente<input id="h-cli" value="${esc(B.client)}"></label>
+    <label class="s2">Vendedor<select id="h-sel">${SELLERS.map(s=>`<option ${B.seller===s?'selected':''}>${s}</option>`).join('')}</select></label>
+    <label class="s2">Status<select id="h-st">${STATUS.map(s=>`<option ${B.status===s?'selected':''}>${s}</option>`).join('')}</select></label>
+    <label class="s2">Ajuste de prazo (%)<input id="h-prazo" type="number" step="0.5" value="${fmtScaled(B.prazoBp)}"></label>
+    <label class="s2">Margem de ajuste (%)<input id="h-marg" type="number" step="0.5" value="${fmtScaled(B.margemBp)}"></label>
+    <label class="s3">Orçamento pai<input disabled value="${B.parentId?'#'+B.parentId:'— (raiz)'}"></label>
+    <label class="s5">Regra de cálculo<input disabled value="${L?'float (JS) × decimal (C#), com ceil em todo cálculo como paliativo':'centavos e pontos-base inteiros (×100) · arredondamento comercial só nas divisões · sem float'}"></label>
+  </div>
+  <div class="stats"><div><small>Subtotal dos grupos</small><b id="t-own"></b></div><div><small>Orçamentos vinculados</small><b id="t-kids"></b></div><div><small>Ajuste de prazo</small><b id="t-prazo"></b></div><div><small>Margem</small><b id="t-marg"></b></div>${L?'<div><small>Divergência navegador × servidor</small><b id="t-diff">—</b></div>':''}<div class="tot"><small>Total</small><b id="t-total"></b></div></div></div>
+  <div class="groups" id="groups"></div>
+  <div style="margin-top:14px"><button onclick="alert('POST /budgets/${B.id}/groups — fora do escopo')">Novo grupo</button></div>
+  <div class="card links" id="links"></div>`;
+  document.querySelectorAll('#modesw button').forEach(b=>b.onclick=()=>{location.hash=b.dataset.m==='legacy'?`#/legacy/b/${id}`:`#/b/${id}`});
+  const S={groups:B.groups.map(g=>({...g,loaded:false,items:[],page:1,ver:0})),prazoBp:B.prazoBp,margemBp:B.margemBp,prazo:B.prazoBp/100,margem:B.margemBp/100,parentId:B.parentId,
+    calc:B.calc,kids:B.kids,srvTotalC:B.serverTotalC,rev:B.rev};
+  const setMx=(act,{client=0,lat=0,screen,touched=0,payload=0})=>{const c=document.querySelectorAll('#mx b');c[0].textContent=act;c[1].textContent=client.toFixed(1)+' ms';c[2].textContent=lat?lat+' ms':'—';c[3].textContent=(screen??client+lat).toFixed(0)+' ms';c[4].textContent=touched.toLocaleString('pt-BR');c[5].textContent=kb(payload);c[6].textContent=document.querySelectorAll('#groups *').length.toLocaleString('pt-BR')};
+  const paint=(flash=true)=>{const $=i=>document.getElementById(i);let o,k,pz,mg,t;
+    if(L){const own=S.groups.reduce((a,g)=>a+g.subF,0),kids=S.kids.reduce((a,x)=>a+x.totF,0),sub=own+kids,ap=ceilF(sub*(1+S.prazo/100)),total=ceilF(ap*(1+S.margem/100));
+      o=brl(own);k=brl(kids);pz=`+${S.prazo}% · ${brl(ap-sub)}`;mg=`+${S.margem}% · ${brl(total-ap)}`;t=brl(total);
+      const d=total-S.srvTotalC/100,el=$('t-diff');el.textContent=(d>=0?'+':'')+brl(d);el.style.color=Math.abs(d)>=.005?'var(--bad)':'var(--good)'}
+    else{const c=S.calc;o=fmtC(c.own);k=fmtC(c.kids);pz=`+${pctTxt(S.prazoBp)} · ${fmtC(c.ap-c.sub)}`;mg=`+${pctTxt(S.margemBp)} · ${fmtC(c.total-c.ap)}`;t=fmtC(c.total)}
+    $('t-own').textContent=o;$('t-kids').textContent=k;$('t-prazo').textContent=pz;$('t-marg').textContent=mg;const el=$('t-total');el.textContent=t;if(flash){el.classList.remove('flash');void el.offsetWidth;el.classList.add('flash')}};
+  const applyCalc=(r,quiet)=>{if(!r.calc)return;const prev=S.calc.kids;S.calc=r.calc;S.kids=r.kids;if(!quiet&&prev!==r.calc.kids)toast('O total de um orçamento vinculado mudou. O servidor recalculou o pai.','warn');drawLinks()};
+
+  /* --- motor legado: tudo lido/escrito no DOM --- */
+  const rowsOf=g=>g.el.querySelectorAll('.it[data-id]');
+  const lRecalc=()=>{let n=0;S.groups.forEach(g=>{if(!g.loaded)return;let s=0;rowsOf(g).forEach(r=>{const q=parseFloat(r.querySelector('[data-f=qty]').value)||0,d=parseFloat(r.querySelector('[data-f=disc]').value)||0,u=parseBRL(r.querySelector('.unit').textContent),t=ceilF(u*q*(1-d/100));r.querySelector('.tot').textContent=brl(t);s+=t;n++});g.subF=s});return n};
+  const lCollect=g=>[...rowsOf(g)].map(r=>({id:r.dataset.id,sku:r.dataset.sku,name:r.querySelector('.nm').textContent,price:parseBRL(r.querySelector('.unit').textContent),qty:+r.querySelector('[data-f=qty]').value,disc:+r.querySelector('[data-f=disc]').value}));
+  const lPersist=()=>{S.groups.forEach(g=>{if(!g.loaded)return;try{localStorage.setItem('legacy:g:'+g.id,JSON.stringify(lCollect(g)))}catch(e){}})};
+  /* todo salvamento envia o orçamento INTEIRO: cabeçalho + todos os grupos + todos os itens */
+  const lCommit=async(act,g,pre)=>{const c0=performance.now();if(pre)pre();const n=lRecalc();lPersist();
+    const loaded={};S.groups.forEach(x=>{if(!x.loaded)return;const d=lCollect(x);x.items=d;x.count=d.length;x.paintHead();loaded[x.id]=d});paint();
+    const v=i=>document.getElementById(i).value;
+    const header={description:v('h-desc'),client:v('h-cli'),seller:v('h-sel'),status:v('h-st'),prazoBp:Math.round(S.prazo*100),margemBp:Math.round(S.margem*100)};
+    const client=performance.now()-c0;
+    const r=await legacySrv.saveAll(id,loaded,header,S.rev);S.rev=r.rev;S.srvTotalC=r.serverTotalC;paint(false);
+    log(`POST /Orcamento/Salvar → orçamento INTEIRO: ${r.groups} grupos, ${r.rows.toLocaleString('pt-BR')} itens, ${kb(r.payload)} · transação com ${r.rows.toLocaleString('pt-BR')} linhas · ${r.lat}ms → servidor recalculou em decimal: ${fmtC(r.serverTotalC)}${r.overwritten?` · ${tag('miss','apagou o que a outra aba salvou')}`:''}`,'miss');
+    if(r.overwritten)toast(`Esta aba estava desatualizada e salvou o orçamento inteiro por cima: “${r.overwritten.name}” voltou de qtd ${r.overwritten.to} para ${r.overwritten.from}. O que você salvou na outra aba foi perdido, sem aviso.`,'bad');
+    setMx(act,{client,lat:r.lat,screen:client,touched:r.rows,payload:r.payload})};
+
+  const onConflict=g=>{toast('409 Conflict: outro usuário alterou este grupo. Os dados foram recarregados.','warn');g.loaded=false;g.page=1;openGroup(g)};
+  const openGroup=async g=>{const body=g.el.querySelector('.g-body');body.innerHTML='<div class="skel"></div><div class="skel"></div><div class="skel"></div>';
+    if(L){const r=await legacySrv.open(id,g);const c0=performance.now();g.items=r.items;g.count=g.items.length;g.loaded=true;draw(g);const n=lRecalc();lPersist();g.paintHead();paint(false);const client=performance.now()-c0;
+      log(`GET /Orcamento/Grupo/${g.id} → ${g.items.length} itens (todos, ${kb(r.payload)} de HTML) · ${r.hit?tag('hit','localStorage HIT, sem validação'):tag('miss','SQL MISS '+r.lat+'ms')} → grava tudo no localStorage`,r.hit?'hit':'miss');
+      setMx('Abrir grupo',{client,lat:r.lat,touched:n,payload:r.payload})}
+    else{const r=await api.getGroup(id,g.id,1);const c0=performance.now();g.items=r.items;g.ver=r.ver;g.loaded=true;draw(g);const client=performance.now()-c0;setMx('Abrir grupo',{client,lat:r.lat,touched:r.items.length,payload:r.payload})}};
+
+  const unitTxt=it=>L?brl(it.price):fmtC(it.priceC),discVal=it=>L?it.disc:fmtScaled(it.discBp),rowTotal=it=>L?brl(itemF(it)):fmtC(itemNewC(it));
+  const idxFor=(g,refId,where)=>{let i=refId?g.items.findIndex(x=>x.id===refId)+(where==='before'?0:1):g.items.length;return i<0?g.items.length:i};
+  const addAt=async(g,p,refId,where)=>{
+    if(L){const n={id:'n'+(++uid),sku:p.sku,name:p.name,price:p.priceC/100,qty:1,disc:0};
+      return lCommit('Adicionar item',g,()=>{g.items=lCollect(g);g.items.splice(idxFor(g,refId,where),0,n);draw(g)})}
+    const r=await api.addItem(id,g.id,p,g.ver,refId,where);if(r.conflict)return onConflict(g);const c0=performance.now();
+    g.items.splice(idxFor(g,refId,where),0,r.item);g.subC=r.subC;g.count=r.count;g.ver=r.ver;applyCalc(r,true);draw(g);g.paintHead();paint();
+    setMx('Adicionar item',{client:performance.now()-c0,lat:r.lat,touched:1,payload:r.payload})};
+  const openInline=(g,row,where)=>{g.el.querySelectorAll('.add.inline').forEach(x=>x.remove());const el=document.createElement('div');el.className='add inline';el.innerHTML='<input class="s" placeholder="Buscar produto para inserir aqui…">';
+    where==='before'?row.before(el):row.after(el);setupSearch(el,p=>{el.remove();addAt(g,p,row.dataset.id,where)},L);const i=el.querySelector('.s');i.focus();i.onkeydown=e=>{if(e.key==='Escape')el.remove()};i.addEventListener('blur',()=>setTimeout(()=>{if(!i.value)el.remove()},200))};
+
+  const draw=g=>{const body=g.el.querySelector('.g-body');
+    body.innerHTML=`<div class="it h"><span></span><span>SKU</span><span>Produto</span><span class="num">Qtd</span><span class="num">Desc. %</span><span class="num">Unitário</span><span class="num">Total</span><span></span></div>`+
+    g.items.map(it=>`<div class="it" draggable="true" data-id="${it.id}" data-sku="${it.sku}"><span class="drag">⠿</span><span class="sku">${it.sku}</span><span class="nm">${esc(it.name)}</span><input type="number" min="1" data-f="qty" value="${it.qty}"><input type="number" min="0" max="100" step="0.5" data-f="disc" value="${discVal(it)}"><span class="num muted unit">${unitTxt(it)}</span><span class="num tot">${rowTotal(it)}</span><button class="x" title="Remover">✕</button><i class="ins up" title="Adicionar produto acima">+</i><i class="ins dn" title="Adicionar produto abaixo">+</i></div>`).join('')+
+    (!L&&g.items.length<g.count?`<div class="more"><button class="more-b">Carregar mais · ${g.items.length}/${g.count}</button></div>`:'')+`<div class="add"><input class="s" placeholder="Buscar produto por nome ou SKU e adicionar ao final…"></div>`;
+    body.querySelectorAll('.it[data-id]').forEach(row=>{const it=g.items.find(i=>i.id===row.dataset.id);
+      row.querySelector('.ins.up').onclick=e=>{e.stopPropagation();openInline(g,row,'before')};row.querySelector('.ins.dn').onclick=e=>{e.stopPropagation();openInline(g,row,'after')};
+      row.querySelectorAll('input').forEach(inp=>inp.onchange=async()=>{const f=inp.dataset.f;
+        if(L){if(f==='qty')inp.value=Math.max(1,parseInt(inp.value)||1);return lCommit('Editar item',g)}
+        const patch=f==='qty'?{qty:Math.max(1,parseInt(inp.value,10)||1)}:{discBp:Math.min(10000,Math.max(0,toInt(inp.value)))};   // texto → inteiro, sem parseFloat
+        inp.value=f==='qty'?patch.qty:fmtScaled(patch.discBp);
+        const r=await api.patchItem(id,g.id,it.id,patch,g.ver);if(r.conflict)return onConflict(g);
+        const c0=performance.now();Object.assign(it,patch);row.querySelector('.tot').textContent=fmtC(r.itemC);g.subC=r.subC;g.ver=r.ver;applyCalc(r);g.paintHead();paint();setMx('Editar item',{client:performance.now()-c0,lat:r.lat,touched:1,payload:r.payload})});
+      row.querySelector('.x').onclick=async()=>{
+        if(L)return lCommit('Remover item',g,()=>row.remove());
+        const r=await api.delItem(id,g.id,it.id,g.ver);if(r.conflict)return onConflict(g);const c0=performance.now();g.items=g.items.filter(x=>x!==it);g.subC=r.subC;g.count=r.count;g.ver=r.ver;applyCalc(r);draw(g);g.paintHead();paint();setMx('Remover item',{client:performance.now()-c0,lat:r.lat,touched:1,payload:r.payload})};
+      row.ondragstart=e=>{e.dataTransfer.setData('text/plain',it.id);row.classList.add('dragging')};row.ondragend=()=>row.classList.remove('dragging');
+      row.ondragover=e=>{e.preventDefault();row.classList.add('over')};row.ondragleave=()=>row.classList.remove('over');
+      row.ondrop=async e=>{e.preventDefault();row.classList.remove('over');const fid=e.dataTransfer.getData('text/plain');if(fid===it.id)return;
+        if(L)return lCommit('Reordenar',g,()=>{const m=g.el.querySelector(`.it[data-id="${fid}"]`);row.parentNode.insertBefore(m,row)});
+        const from=g.items.findIndex(x=>x.id===fid),to=g.items.indexOf(it);if(from<0)return;const[m]=g.items.splice(from,1);g.items.splice(to,0,m);const prev=g.items[to-1];
+        const r=await api.reorder(id,g.id,fid,prev&&prev.id,g.ver);if(r.conflict)return onConflict(g);const c0=performance.now();g.ver=r.ver;draw(g);setMx('Reordenar',{client:performance.now()-c0,lat:r.lat,touched:0,payload:r.payload})}});
+    const mb=body.querySelector('.more-b');if(mb)mb.onclick=async()=>{mb.disabled=true;mb.textContent='Carregando…';g.page++;const r=await api.getGroup(id,g.id,g.page);g.items.push(...r.items);draw(g)};
+    setupSearch(body.querySelector('.add'),p=>{const last=g.items[g.items.length-1];addAt(g,p,last&&last.id,'after')},L)};
+
+  const hdrSend=(el,key,num)=>document.getElementById(el).onchange=async e=>{const raw=e.target.value,calc=key==='prazoBp'||key==='margemBp';
+    const v=num?toInt(raw):raw;   // "5,5" → 550 (inteiro), sem float
+    if(L){if(calc)S[key==='prazoBp'?'prazo':'margem']=v/100;return lCommit('Cabeçalho: '+key,null)}
+    const r=await api.patchHeader(id,{[key]:v});const c0=performance.now();if(calc)S[key]=v;applyCalc(r,true);paint(calc);setMx('Cabeçalho: '+key,{client:performance.now()-c0,lat:r.lat,touched:calc?S.groups.length+S.kids.length:0,payload:r.payload})};
+  [['h-desc','description'],['h-cli','client'],['h-st','status'],['h-sel','seller']].forEach(([a,k])=>hdrSend(a,k));hdrSend('h-prazo','prazoBp',1);hdrSend('h-marg','margemBp',1);
+
+  if(L){
+    document.getElementById('other').onclick=()=>{const g=S.groups.find(x=>x.loaded)||S.groups[0],r=legacySrv.otherTab(id,g.id);
+      toast(`Você abriu este orçamento em outra aba e salvou lá: “${r.name}” qtd ${r.from} → ${r.to}. O bloqueio não impede (é o mesmo usuário) e esta aba continua mostrando ${r.from}. Faça qualquer alteração aqui e veja o que acontece.`,'warn')};
+    document.getElementById('other2').onclick=()=>{const user=SELLERS.find(s=>s!==B.seller)||'Marina Costa';legacySrv.tryOpenAsOther(id,user);
+      toast(`${user} tentou abrir o orçamento #${id} e foi bloqueado: está aberto por você. O bloqueio só é liberado quando você sai da tela.`,'warn')};
+  }else document.getElementById('other').onclick=()=>{const g=S.groups.find(x=>x.loaded)||S.groups[0],r=api.otherUser(id,g.id);
+    toast(`Outra aba ou outro usuário mudou “${r.name}” de ${fmtC(r.before)} para ${fmtC(r.after)} (grupo na v${r.ver}). Edite algo no grupo “${g.name}” aqui: esta aba recebe 409 e recarrega o grupo, sem apagar nada.`,'warn')};
+
+  /* --- orçamentos vinculados (profundidade máxima 1) --- */
+  const drawLinks=()=>{const el=document.getElementById('links');if(!el)return;
+    const rows=S.kids.map(k=>`<div class="lr"><span class="id">#${k.id}</span><span style="flex:1">${esc(k.description)}</span><b class="num">${L?brl(k.totF):fmtC(k.totalC)}</b><button data-open="${k.id}">Abrir</button><button data-other="${k.id}" title="Altera um preço dentro do filho, como outro usuário">Simular outro usuário no filho</button><button class="ghost" data-un="${k.id}">Desvincular</button></div>`).join('');
+    const elig=DB.budgets.filter(x=>!S.kids.some(k=>k.id===x.id)&&!linkError(id,x.id)).slice(0,40);
+    el.innerHTML=`<div class="lh"><h3>Orçamentos vinculados</h3><span class="pill" style="--c:var(--accent)">profundidade máxima: 1 nível</span><span class="muted sm">O total de cada filho (com o prazo e a margem dele) entra no subtotal deste orçamento, e só depois valem o prazo e a margem do pai.</span></div>
+    ${S.parentId?`<div class="lr"><span class="muted" style="flex:1">Este orçamento está dentro de <b>#${S.parentId}</b>. Alterações aqui mudam o total do pai, e ele não pode ter filhos próprios.</span><button data-open="${S.parentId}">Abrir pai</button></div>`:(rows||'<div class="lr muted">Nenhum orçamento vinculado.</div>')}
+    ${S.parentId?'':`<div class="lf"><select id="lsel">${elig.map(x=>`<option value="${x.id}">#${x.id} · ${esc(x.description)}</option>`).join('')}</select><button id="ladd" class="primary">Vincular</button><button id="lbad" class="ghost" title="Tenta vincular um orçamento que já tem filhos, para ver a regra de profundidade">Testar regra de profundidade</button></div>`}`;
+    el.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>nav('detail',+b.dataset.open));
+    el.querySelectorAll('[data-un]').forEach(b=>b.onclick=()=>unlink(+b.dataset.un));
+    el.querySelectorAll('[data-other]').forEach(b=>b.onclick=()=>{const r=api.otherUserChild(+b.dataset.other);toast(L?`Outro usuário mudou “${r.name}” no filho #${b.dataset.other}. Esta tela guardou o total do filho no momento em que abriu: o pai segue errado até recarregar, e o servidor já calcula outro valor (a divergência aparece após salvar algo).`:`Outro usuário mudou “${r.name}” no filho #${b.dataset.other}. O pai não foi tocado: o servidor soma o total atual do filho na próxima operação.`,'warn')});
+    const add=el.querySelector('#ladd');if(add)add.onclick=()=>link(+el.querySelector('#lsel').value);
+    const bad=el.querySelector('#lbad');if(bad)bad.onclick=()=>link(id===1042?1048:1042)};
+  const link=async cid=>{const err=linkError(id,cid);
+    if(L){if(err){toast(err,'bad');return}const r=await legacySrv.link(id,cid);S.kids=r.kids;S.srvTotalC=r.serverTotalC;drawLinks();paint();log(`POST /Orcamento/Vincular {${cid}} · ${r.lat}ms`,'miss');setMx('Vincular orçamento',{lat:r.lat,screen:0,touched:S.kids.length,payload:250});return}
+    const r=await api.link(id,cid);if(r.error){toast('422: '+r.error,'bad');return}applyCalc(r,true);paint();setMx('Vincular orçamento',{lat:r.lat,touched:S.kids.length,payload:r.payload})};
+  const unlink=async cid=>{if(L){const r=await legacySrv.unlink(id,cid);S.kids=r.kids;S.srvTotalC=r.serverTotalC;drawLinks();paint();setMx('Desvincular',{lat:r.lat,screen:0,touched:S.kids.length,payload:250});return}
+    const r=await api.unlink(id,cid);applyCalc(r,true);paint();setMx('Desvincular',{lat:r.lat,touched:S.kids.length,payload:r.payload})};
+
+  const gw=document.getElementById('groups');
+  S.groups.forEach(g=>{
+    const el=g.el=document.createElement('div');el.className='card group';
+    el.innerHTML=`<div class="g-head"><span class="chev">▶</span><input class="gn" value="${esc(g.name)}"><input class="cat" value="${esc(g.category)}" title="Categoria"><span class="sp"></span><span class="muted sm cnt"></span><span class="sub"></span></div><div class="g-body"></div>`;gw.appendChild(el);
+    g.paintHead=()=>{el.querySelector('.cnt').textContent=`${g.count} itens`;el.querySelector('.sub').textContent=L?brl(g.subF):fmtC(g.subC)};g.paintHead();
+    el.querySelectorAll('.g-head input').forEach(i=>i.onclick=e=>e.stopPropagation());
+    el.querySelector('.gn').onchange=e=>api.patchGroup(id,g.id,{name:e.target.value});el.querySelector('.cat').onchange=e=>api.patchGroup(id,g.id,{category:e.target.value});
+    el.querySelector('.g-head').onclick=()=>{el.classList.toggle('open');if(el.classList.contains('open')&&!g.loaded)openGroup(g)};
+  });
+  paint(false);drawLinks();
+}
+function setupSearch(wrap,onPick,legacy){
+  const inp=wrap.querySelector('.s');let box=null,res=[],sel=-1;
+  const close=()=>{box&&box.remove();box=null;sel=-1};
+  const pickIt=p=>{close();inp.value='';onPick(p)};
+  const draw=()=>{close();if(!res.length)return;box=document.createElement('div');box.className='sugg';
+    box.innerHTML=res.map((p,i)=>`<div data-i="${i}" class="${i===sel?'sel':''}"><span>${hl(p.name,inp.value.trim().split(/\s+/)[0])}<small>${p.sku}</small></span><b>${fmtC(p.priceC)}</b></div>`).join('');
+    box.onmousedown=e=>{const d=e.target.closest('[data-i]');if(d){e.preventDefault();pickIt(res[+d.dataset.i])}};wrap.appendChild(box)};
+  inp.oninput=debounce(async()=>{const q=inp.value.trim();if(!q){close();return}res=await api.catalog(q,legacy);sel=-1;draw()},180);
+  inp.addEventListener('keydown',e=>{if(!res.length)return;if(e.key==='ArrowDown'){sel=Math.min(res.length-1,sel+1);draw();e.preventDefault()}else if(e.key==='ArrowUp'){sel=Math.max(0,sel-1);draw();e.preventDefault()}else if(e.key==='Enter'&&sel>=0)pickIt(res[sel]);else if(e.key==='Escape')close()});
+  inp.addEventListener('blur',()=>setTimeout(close,120));
+}
+
+/* ============ LEGADA em lote (usada só na comparação) ============
+   Mesmo padrão, sem a tela: renderiza N linhas, lê inputs, recalcula tudo em float, regrava células, serializa. Trabalho REAL medido. */
+const LKEY='legacy:bench';
+const lsSize=()=>{try{return(localStorage.getItem(LKEY)||'').length*2}catch(e){return 0}};
+class LegacyEditor{
+  constructor(host,n){this.host=host;this.n=n;this.prazo=5;this.margem=15;this.items=genItems(n,7).map(toLegacy)}
+  render(){const rows=this.items.map(it=>`<tr class="r" data-id="${it.id}"><td>${esc(it.name)}</td><td><input class="qty" type="number" value="${it.qty}"></td><td><input class="disc" type="number" value="${it.disc}"></td><td class="unit">${brl(it.price)}</td><td class="tot">${brl(itemF(it))}</td></tr>`).join('');
+    this.host.innerHTML=`<table><tbody>${rows}</tbody></table>`;this.host.offsetHeight;this.tbody=this.host.querySelector('tbody')}
+  recalcAll(){const rows=this.tbody.querySelectorAll('tr.r');let sub=0;
+    rows.forEach(r=>{const q=parseFloat(r.querySelector('.qty').value)||0,d=parseFloat(r.querySelector('.disc').value)||0,u=parseBRL(r.querySelector('.unit').textContent),t=ceilF(u*q*(1-d/100));r.querySelector('.tot').textContent=brl(t);sub+=t});
+    this.jsTotal=ceilF(ceilF(sub*(1+this.prazo/100))*(1+this.margem/100));this.host.offsetHeight;return rows.length}
+  persist(){const data=[...this.tbody.querySelectorAll('tr.r')].map(r=>({id:r.dataset.id,name:r.cells[0].textContent,qty:+r.querySelector('.qty').value,disc:+r.querySelector('.disc').value,unit:r.querySelector('.unit').textContent}));
+    const json=JSON.stringify(data);let ok=true;try{localStorage.setItem(LKEY,json)}catch(e){ok=e.name==='QuotaExceededError'?'quota':'blocked'}return{bytes:json.length,ok}}
+  qd(it){const r=this.tbody?.querySelector(`tr[data-id="${it.id}"]`);return r?{q:+r.querySelector('.qty').value,d:+r.querySelector('.disc').value}:{q:it.qty,d:it.disc}}
+  decTotalC(){const c=this.items.reduce((s,it)=>{const{q,d}=this.qd(it);return s+itemDecC({priceC:Math.round(it.price*100),qty:q,discBp:Math.round(d*100)})},0);return ceilDiv(ceilDiv(c*(10000+Math.round(this.prazo*100)),10000)*(10000+Math.round(this.margem*100)),10000)}
+  newTotalC(){const c=this.items.reduce((s,it)=>{const{q,d}=this.qd(it);return s+itemNewC({priceC:Math.round(it.price*100),qty:q,discBp:Math.round(d*100)})},0);return roundDiv(roundDiv(c*(10000+Math.round(this.prazo*100)),10000)*(10000+Math.round(this.margem*100)),10000)}
+  measure(fn,persist){const t=performance.now();const n=fn();const p=persist?this.persist():{bytes:0,ok:true};return{ms:performance.now()-t,iterated:n,bytes:p.bytes,ok:p.ok}}
+  openMeasured(){const t=performance.now();this.render();const n=this.recalcAll();const p=this.persist();return{ms:performance.now()-t,iterated:n,bytes:p.bytes,ok:p.ok,nodes:this.host.querySelectorAll('*').length}}
+  edit(){const r0=this.tbody.querySelector('tr.r .qty');r0.value=(+r0.value||1)+1;return this.measure(()=>this.recalcAll(),true)}
+  reorder(){const rows=this.tbody.querySelectorAll('tr.r');this.tbody.insertBefore(rows[0],rows[Math.min(5,rows.length-1)]);return this.measure(()=>this.recalcAll(),true)}
+  setMargin(v){this.margem=v;return this.measure(()=>this.recalcAll(),false)}
+}
+
+/* ============ COMPARAR ============ */
+function renderCompare(){
+  app.innerHTML=`<div class="pagehead"><div><h2>Antiga × nova</h2><p class="muted">Mesmo orçamento, mesmas ações, no <b>ambiente escolhido no topo</b> (padrão: VPS Contabo US Central, 4 vCPU / 8 GB). A coluna da esquerda executa o padrão antigo de verdade no seu navegador; rede e servidor são simulados nos dois lados com as mesmas fórmulas.</p></div></div>
+  <div class="toolbar"><label class="muted sm">Itens no grupo grande&nbsp;<select id="cn"><option>1000</option><option selected>5000</option><option>20000</option></select></label><button class="primary" id="crun">Executar comparação</button><span class="muted sm" id="cstat"></span></div>
+  <div class="card" style="overflow:hidden"><table class="cmp"><thead><tr><th style="width:17%">Cenário</th><th class="c-leg" style="width:27%">Legada · Razor + jQuery + C#</th><th class="c-new" style="width:27%">Nova · NestJS + Redis + ES</th><th>Por quê</th></tr></thead><tbody id="cb"><tr><td colspan="4" class="muted">Clique em “Executar comparação”.</td></tr></tbody></table></div>
+  <div class="card" style="padding:16px 22px;margin-top:14px"><h3 style="margin-bottom:6px">O que é medido e o que é simulado</h3><p class="muted sm"><b style="color:var(--text)">Medido de verdade:</b> renderização de N linhas no DOM, leitura e parse dos inputs, recálculo, reescrita das células e <code>JSON.stringify</code>, com <code>performance.now()</code>. <b style="color:var(--text)">Simulado:</b> rede (RTT, vazão, jitter), CPU do servidor e fila com vários usuários, Razor, controller C#, Redis, Postgres e Elasticsearch. O “C# decimal” é JS imitando arredondamento por linha. Se o localStorage estiver bloqueado (como no painel do app), o custo de <code>setItem</code> não entra na medição. Esta é a minha reconstrução do padrão, não o sistema original.</p></div>
+  <h3 style="margin:28px 0 12px">O que acontece em uma edição</h3>
+  <div class="grid2">
+   <div class="card flow bad"><h3>Legada <span class="pill" style="--c:var(--bad)">O(n) no cliente e no servidor</span></h3><ol>
+    <li>Usuário altera a quantidade de 1 item</li><li>jQuery percorre <b>todas</b> as N linhas lendo inputs e parseando texto “R$ 1.234,56”</li><li>Recalcula tudo em JS (float) e regrava N células, com a tela travada</li><li>Serializa N itens e grava no <b>localStorage</b></li><li>POST do <b>orçamento inteiro</b> (cabeçalho, todos os grupos, todos os itens) até os EUA (~175 ms de RTT + upload)</li><li>C# desserializa, recalcula em <b>decimal</b> e grava todas as linhas numa transação: CPU de 4 vCPU compartilhada entre todos os usuários</li><li>O valor do servidor pode divergir do que o usuário viu</li></ol></div>
+   <div class="card flow good"><h3>Nova <span class="pill" style="--c:var(--good)">O(1) no servidor</span></h3><ol>
+    <li>Usuário altera a quantidade de 1 item</li><li><code>PATCH /items/:id</code> com só o campo alterado + <code>If-Match: version</code> (~150 B)</li><li>Transação no Postgres e <b>delta</b> em centavos inteiros no subtotal do grupo (Redis)</li><li>Servidor soma subtotais + totais dos orçamentos vinculados e devolve o total; o front só exibe</li><li>Evento na fila (BullMQ) reindexa o orçamento no Elasticsearch</li><li>Versão desatualizada → <b>409</b>, o front recarrega o grupo</li></ol>
+    <p class="muted sm" style="margin-top:10px">A edição paga o RTT de qualquer forma. Como o cálculo é feito com inteiros, a mesma função pode rodar no front para dar resposta otimista sem risco de divergir.</p></div></div>
+  <h3 style="margin:28px 0 12px">Problemas da arquitetura antiga e a correção</h3>
+  <div class="issues">${[
+   ['Float no JS × decimal no C#','O navegador calculava em float e o servidor em decimal, e os dois não batiam em centavos. Paliativo da época, com aval do cliente: arredondar <b>sempre para cima</b> em todo cálculo, para errar a favor da empresa. Em float até o ceil falha (1,1 × 100 = 110,00000000000001 → 111).','<b>Correção:</b> tudo inteiro: centavos (×100) e pontos-base (×100). Só há arredondamento nas divisões, com uma regra padrão, igual no front e no back. Sem divergência, o paliativo do ceil deixa de ser necessário.'],
+   ['Orçamento dentro de orçamento','O total do pai depende do total (já ajustado) dos filhos. A tela do pai guarda uma cópia do filho, que envelhece. A regra de profundidade 1 vivia espalhada.','<b>Correção:</b> o servidor soma os totais atuais dos filhos a cada cálculo e valida a profundidade (422). Sem cópia no cliente.'],
+   ['Ambiente de produção ≠ dev','Em dev (rede local) parecia ok. Na VPS dos EUA, cada ida e volta custa ~175 ms, o payload de milhares de linhas cruza a rede e 4 vCPUs são divididas entre os usuários.','<b>Correção:</b> poucas chamadas, payloads pequenos, itens paginados, cache no Redis e trabalho pesado fora do caminho da requisição.'],
+   ['Recalcular tudo a cada edição','Custo cresce com o nº de itens: milhares de linhas lidas e reescritas por clique, com a tela travada.','<b>Correção:</b> subtotal por grupo mantido por delta; total = soma de N grupos + filhos.'],
+   ['Bloqueio no banco e várias abas','Abrir marcava o orçamento como “aberto” e barrava outros usuários, mas o mesmo usuário em duas abas tinha dois estados (localStorage + página): a aba desatualizada salvava por cima da outra.','<b>Correção:</b> bloqueio com expiração no Redis, versão por grupo (409) e abas sincronizadas por <code>BroadcastChannel</code>.'],
+   ['Salvar o orçamento inteiro','Para mudar 1 item, ia o orçamento todo: ex.: 12 grupos e 500+ produtos numa transação.','<b>Correção:</b> <code>PATCH</code> só do que mudou, transação de 1 item + 1 subtotal, edições em lote.'],
+   ['Front antigo em cache após o deploy','O navegador mantinha o JS anterior com o back-end novo; telas quebravam até um Ctrl+F5.','<b>Correção:</b> arquivos com hash no nome (Vite), <code>index.html</code> sem cache e aviso de nova versão.'],
+   ['Busca acoplada ao banco relacional','Filtros e texto livre via LIKE sobre as mesmas tabelas da escrita, disputando CPU com os saves.','<b>Correção:</b> índice no Elasticsearch atualizado por fila; Postgres fica com a escrita.']
+  ].map(([t,s,f])=>`<div class="card issue"><div class="t">${t}</div><p>${s}</p><p style="margin-top:6px">${f}</p></div>`).join('')}</div>`;
+  document.getElementById('crun').onclick=runCompare;
+}
+
+async function runCompare(){
+  const btn=document.getElementById('crun'),st=document.getElementById('cstat'),n=+document.getElementById('cn').value;btn.disabled=true;
+  const host=document.createElement('div');host.style.cssText='position:absolute;left:-99999px;top:0;width:900px';document.body.appendChild(host);
+  try{
+    st.textContent='Legada: abrindo…';await sleep(40);const L=new LegacyEditor(host,n);const lo=L.openMeasured();
+    st.textContent='Legada: editando…';await sleep(40);const le=L.edit();const lr=L.reorder();
+    st.textContent='Legada: margem…';await sleep(40);const lm=L.setMargin(L.margem+5);
+    const lsB=lsSize(),jsT=L.jsTotal,decC=L.decTotalC(),newC=L.newTotalC();
+    st.textContent='Nova: simulando…';await sleep(40);
+    const h2=document.createElement('div');h2.style.cssText=host.style.cssText;document.body.appendChild(h2);const no=new LegacyEditor(h2,25).openMeasured();h2.remove();
+    const nCli=.4,pageBytes=sizeOf(genItems(25)),upAll=le.bytes,T=o=>netTime(o,false);
+    const open={l:{c:lo.ms,n:T({down:n*rowHtmlLen,srv:25+.12*n})},w:{c:no.ms,n:T({down:pageBytes,srv:25+1.2})}};
+    const edit={l:{c:le.ms,n:T({up:upAll,down:300,srv:15+.1*n})},w:{c:nCli,n:T({up:150,down:500,srv:4})}};
+    const reord={l:{c:lr.ms,n:T({up:upAll,down:300,srv:15+.1*n})},w:{c:nCli,n:T({up:120,down:100,srv:3})}};
+    const marg={l:{c:lm.ms,n:T({up:250,down:300,srv:20})},w:{c:nCli,n:T({up:150,down:400,srv:4})}};
+    const f=x=>x<10?x.toFixed(1):Math.round(x).toLocaleString('pt-BR');
+    const bar=(v,m)=>`<div class="bar-t"><i style="width:${Math.max(3,Math.min(100,v/m*100))}%"></i></div>`;
+    const two=(a,b)=>Math.max(a,b,1);
+    const cellOpen=x=>`<div class="v">Tela: ${f(x.c+x.n)} ms</div><div class="s">${f(x.c)} ms no navegador · ${f(x.n)} ms rede+servidor</div>`;
+    const cellSave=(x,legacy)=>legacy?`<div class="v">Tela: ${f(x.c)} ms <span class="s">(travada)</span></div><div class="v">Salvo: ${f(x.c+x.n)} ms</div>`:`<div class="v">Tela: ${f(x.c+x.n)} ms</div><div class="v">Salvo: ${f(x.c+x.n)} ms</div>`;
+    const row=(name,l,w,why,m)=>`<tr><td><b>${name}</b></td><td class="c-leg">${l}${m?bar(m[0],two(...m)):''}</td><td class="c-new">${w}${m?bar(m[1],two(...m)):''}</td><td class="muted sm">${why}</td></tr>`;
+    const srvL=srvMs(15+.1*n),srvN=srvMs(4);
+    const c=budget(1043),p=budget(1042),d0=CATALOG[0].priceC;
+    const childTot=roundDiv(roundDiv(d0*(10000+c.prazoBp),10000)*(10000+c.margemBp),10000),parentDelta=roundDiv(roundDiv(childTot*(10000+p.prazoBp),10000)*(10000+p.margemBp),10000);
+    const E=ENVS[ENV.key];
+    document.getElementById('cb').innerHTML=[
+      row(`Abrir o grupo grande (${n.toLocaleString('pt-BR')} itens)`,cellOpen(open.l)+`<div class="s">${kb(n*rowHtmlLen)} de HTML · ${lo.nodes.toLocaleString('pt-BR')} nós DOM</div>`,cellOpen(open.w)+`<div class="s">${kb(pageBytes)} · 25 itens da página</div>`,'Legada traz e renderiza todas as linhas, e grava tudo no localStorage. Nova traz uma página do Redis.',[open.l.c+open.l.n,open.w.c+open.w.n]),
+      row('Editar 1 quantidade',cellSave(edit.l,true)+`<div class="s">${le.iterated.toLocaleString('pt-BR')} linhas varridas · POST do orçamento inteiro: ${kb(upAll)}</div>`,cellSave(edit.w,false)+`<div class="s">1 item · PATCH de ~150 B</div>`,'Legada responde local, mas trava a tela e depois sobe o orçamento inteiro. Nova paga o RTT e envia só o delta; com inteiros dá para ser otimista.',[edit.l.c+edit.l.n,edit.w.c+edit.w.n]),
+      row('Reordenar 1 item',cellSave(reord.l,true)+`<div class="s">reposição no DOM + POST do orçamento inteiro: ${kb(upAll)}</div>`,cellSave(reord.w,false)+`<div class="s">só a posição do item (índice fracionário)</div>`,'Na legada reordenar reenvia o orçamento inteiro. Na nova muda uma posição.',[reord.l.c+reord.l.n,reord.w.c+reord.w.n]),
+      row('Alterar a margem (%)',cellSave(marg.l,true)+`<div class="s">${lm.iterated.toLocaleString('pt-BR')} linhas varridas</div>`,cellSave(marg.w,false)+`<div class="s">subtotais + filhos, 0 itens lidos</div>`,'A margem só reaplica a taxa sobre os subtotais.',[marg.l.c+marg.l.n,marg.w.c+marg.w.n]),
+      row(`CPU do servidor por salvamento (${E.cores} vCPU, ${ENV.users} usuários)`,`<div class="v">${srvL.toLocaleString('pt-BR')} ms</div><div class="s">desserializa ${n.toLocaleString('pt-BR')} itens, recalcula e atualiza ${n.toLocaleString('pt-BR')} linhas</div>`,`<div class="v">${srvN.toLocaleString('pt-BR')} ms</div><div class="s">1 item + incremento inteiro no Redis</div>`,'Com poucas vCPUs, o custo por requisição vira fila quando há vários usuários.',[srvL,srvN]),
+      row('Armazenamento no navegador',lo.ok===true?`<div class="v">${kb(lsB)} no localStorage</div><div class="s">cota ~5 MB por origem</div>`:lo.ok==='quota'?'<div class="v">Cota estourada: cache não grava</div>':`<div class="v">${kb(sizeOf(L.items)*2)} iriam ao localStorage</div><div class="s">(bloqueado neste ambiente)</div>`,'<div class="v">0 B</div><div class="s">estado fica no Redis</div>','localStorage tem cota por origem e não é compartilhado entre usuários.'),
+      row('Dois usuários no mesmo orçamento','<div class="v">Segundo usuário bloqueado</div><div class="s">marcação “aberto” no banco, liberada ao sair da tela</div>','<div class="v">Bloqueio com expiração</div><div class="s">Redis com TTL renovado; se o navegador fechar, expira sozinho</div>','A regra de negócio continua; muda onde o bloqueio vive.'),
+      row('Mesmo orçamento em duas abas','<div class="v">Aba desatualizada apaga a outra</div><div class="s">cada aba tem seu estado; o bloqueio não cobre o mesmo usuário</div>','<div class="v">Detecta e sincroniza</div><div class="s">PATCH com If-Match antigo → 409; BroadcastChannel avisa as outras abas</div>','Estado na página × servidor como fonte da verdade.'),
+      row('Precisão do total',`<div class="v">JS (float + ceil) ${brl(jsT)}</div><div class="v">C# (decimal + ceil) ${fmtC(decC)}</div><div class="s">diferença ${brl(jsT-decC/100)} entre o que o usuário vê e o que o servidor grava, mesmo com o paliativo</div>`,`<div class="v">${fmtC(newC)}</div><div class="s">front e servidor idênticos (só inteiros, arredondamento comercial). Sem ceil: ${fmtC(decC-newC)} a menos que o paliativo cobrava a mais</div>`,'O ceil só reduzia a perda e enviesava o total para cima. Com inteiros a divergência some na origem e o paliativo sai.'),
+      row('Alterar o orçamento filho','<div class="v">Pai desatualizado</div><div class="s">a tela do pai guarda uma cópia do total do filho; o pai erra '+fmtC(parentDelta)+' a cada unidade, até recarregar</div>','<div class="v">Pai correto</div><div class="s">o servidor soma o total atual de cada filho (1 nível) a cada cálculo</div>','Total do pai = (subtotais + totais dos filhos) com o prazo e a margem do pai.')
+    ].join('');
+    st.textContent='Pronto.';
+  }finally{host.remove();btn.disabled=false}
+}
+
+route();
+</script>
+</body>
+</html>

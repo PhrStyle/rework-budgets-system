@@ -1,0 +1,30 @@
+# Node
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.pnpm-store/
+
+# .NET (legada)
+bin/
+obj/
+*.user
+.vs/
+
+# Ambiente
+.env
+.env.*
+!.env.example
+
+# Benchmark
+bench/results/
+
+# Sistema e editores
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.log
+
+# Documentos locais (não versionados)
+PLANO.md
