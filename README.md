@@ -12,7 +12,7 @@
 **Stack:** TypeScript · Node.js · NestJS · PostgreSQL + Prisma · Redis · Elasticsearch · BullMQ · React + Vite · Vitest · Docker · Sentry · Prometheus
 **Versão legada (reprodução):** ASP.NET Core Razor Pages · jQuery · PostgreSQL + Entity Framework
 
-<!-- badges: CI, cobertura, licença -->
+[![CI](https://github.com/PhrStyle/rework-budgets-system/actions/workflows/ci.yml/badge.svg)](https://github.com/PhrStyle/rework-budgets-system/actions/workflows/ci.yml)
 
 ---
 
