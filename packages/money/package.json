@@ -1,0 +1,13 @@
+{
+  "name": "@budgets/money",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Dinheiro em inteiros: centavos, pontos-base e arredondamento comercial, sem float.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

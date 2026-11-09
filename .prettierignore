@@ -1,0 +1,7 @@
+pnpm-lock.yaml
+coverage/
+dist/
+# protótipo em HTML único, escrito à mão e minificado de propósito
+prototype/
+# documentos: formatação manual
+*.md
