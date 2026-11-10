@@ -409,19 +409,20 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 - **Solução:**
   - O estado da edição sai do navegador e vai para um **rascunho único por usuário no servidor** ([ADR 0004](docs/adr/0004-rascunho-de-edicao-no-redis.md)). Todas as abas editam o mesmo rascunho, então não há mais duas versões para divergir.
   - **O rascunho segura o bloqueio:** a marcação “aberto” no banco, que já expirava sozinha, vira um bloqueio no Redis (`SET NX` com TTL) ligado ao **rascunho**, e não à tela: expira junto com ele, 30 minutos após a última edição. Enquanto houver alterações não salvas, ninguém mais edita; sem rascunho, o orçamento fica livre.
-  - ⟨**Versão por grupo no rascunho:** cada edição envia a versão do grupo que a aba viu; uma aba com versão velha recebe 409 e recarrega o grupo, sem sobrescrever a outra⟩
-  - ⟨**Abas atualizadas:** após cada edição, as outras abas recebem o aviso (`BroadcastChannel`) e recarregam do rascunho⟩
+  - **Abas do mesmo usuário compartilham o rascunho:** cada edição é um *compare-and-set* (script Lua) na revisão do rascunho; se outra aba gravou no meio, a edição é refeita sobre a versão nova, e nenhuma se perde
+  - **Versão por grupo no salvar:** cada grupo tocado precisa estar na versão em que o rascunho o leu; se algo gravou fora do rascunho, o salvar responde 409 com os grupos e não grava nada
+  - ⟨**Abas atualizadas** (etapa 8): após cada edição, as outras abas recebem o aviso (`BroadcastChannel`) e recarregam do rascunho⟩
 
 - **Resultado:**
 
 | Métrica | Antes | Depois |
 |---|---|---|
-| Edições perdidas entre abas (teste automatizado) | — | 0 |
+| Edições perdidas com 10 edições simultâneas no mesmo rascunho (teste automatizado) | — | 0 |
 | Alterações perdidas por causa do bloqueio | — | 0 (o bloqueio dura enquanto existe o rascunho) |
 | Conflitos detectados e recarregados | — | — |
 
 - **Trade-offs:** ⟨O bloqueio por orçamento impede dois usuários de trabalharem em paralelo no mesmo orçamento; foi mantido porque é a regra de negócio conhecida pelos usuários. Um rascunho esquecido segura o bloqueio por até 30 minutos.⟩
-- **Onde ver:** legada: [`OrcamentosController.Abrir`](legacy/src/Budgets.Legacy.Api/Controllers/OrcamentosController.cs) (marcação “aberto” que expira em 30 min). Ao reproduzir, apareceu uma corrida: o “liberar” enviado pela página que sai (F5, outra aba) podia chegar depois da nova abertura e soltar o bloqueio dela; o “liberar” passou a levar o instante da abertura e só vale para ela · ⟨nova: …⟩
+- **Onde ver:** legada: [`OrcamentosController.Abrir`](legacy/src/Budgets.Legacy.Api/Controllers/OrcamentosController.cs) (marcação “aberto” que expira em 30 min). Ao reproduzir, apareceu uma corrida: o “liberar” enviado pela página que sai (F5, outra aba) podia chegar depois da nova abertura e soltar o bloqueio dela; o “liberar” passou a levar o instante da abertura e só vale para ela · nova: o rascunho é o bloqueio, uma chave só com `SET NX` e TTL, em [`draft.store.ts`](apps/api/src/drafts/draft.store.ts); não há “liberar” para chegar atrasado
 
 ---
 
@@ -438,13 +439,13 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 
 | Métrica | Antes | Depois |
 |---|---|---|
-| Salvar 1 alteração no pior caso real (15 grupos, 1.000 itens) · rede local | 177 KB enviados, ~320 ms, 1.000 itens apagados e regravados | — |
+| Salvar 1 alteração no pior caso real (15 grupos, 1.000 itens) · rede local | 177 KB enviados, ~320 ms, 1.000 itens apagados e regravados | 0 B enviados (o changeset já está no servidor), ~19 ms, 1 item e 1 grupo gravados |
 | Salvar 1 alteração no perfil de estresse (5.000 itens, acima do real) · rede local | 878 KB enviados, ~1,8 s, 5.000 itens apagados e regravados | — |
-| Payload por salvamento | — | — |
-| Tempo de salvamento | — | — |
+| Payload por edição | o orçamento inteiro, a cada salvamento | ~60 B por edição, para o rascunho |
+| Rascunho guardado depois de 1 alteração | página + `localStorage` | 555 B no `redis-data` |
 
 - **Trade-offs:** ⟨Um salvamento com muitas alterações ainda grava muitas linhas, mas o custo passa a ser proporcional ao que mudou, não ao tamanho do orçamento.⟩
-- **Onde ver:** legada: [`OrcamentosController.Salvar`](legacy/src/Budgets.Legacy.Api/Controllers/OrcamentosController.cs) (apaga e regrava tudo numa transação) · ⟨nova: …⟩
+- **Onde ver:** legada: [`OrcamentosController.Salvar`](legacy/src/Budgets.Legacy.Api/Controllers/OrcamentosController.cs) (apaga e regrava tudo numa transação) · nova: [`draft-saver.ts`](apps/api/src/drafts/draft-saver.ts) (grava só o changeset; confere a versão dos grupos e recalcula os subtotais pelo banco). Medido com `curl` na mesma máquina, mediana de 7 rodadas
 
 ---
 
@@ -467,7 +468,7 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 | Salvamentos por sessão de edição | 1 a cada 5 min + manuais | só os manuais |
 
 - **Trade-offs:** ⟨Um rascunho abandonado expira em 30 minutos: é uma rede de segurança para imprevistos, não um lugar para guardar trabalho por dias. Em troca, o `redis-data` guarda dados do usuário e precisa de AOF e de monitoramento de memória.⟩
-- **Onde ver:** legada: salvamento automático e `salvar()` em [`orcamento.js`](legacy/src/Budgets.Legacy.Web/wwwroot/js/orcamento.js). Reproduzido: uma quantidade editada de 4 para 9, sem salvar, volta a 4 depois que a página cai · ⟨nova: …⟩
+- **Onde ver:** legada: salvamento automático e `salvar()` em [`orcamento.js`](legacy/src/Budgets.Legacy.Web/wwwroot/js/orcamento.js). Reproduzido: uma quantidade editada de 4 para 9, sem salvar, volta a 4 depois que a página cai · nova: [`drafts.service.ts`](apps/api/src/drafts/drafts.service.ts) (abrir, editar, salvar, descartar); o teste [`durability.test.ts`](apps/api/src/drafts/durability.test.ts) reinicia o Redis no meio da edição e o rascunho continua lá (e falha se o AOF for desligado)
 
 ---
 
@@ -635,7 +636,7 @@ docs/adr/             decisões de arquitetura
 - [x] Versão legada: front Razor Pages intermediário, login simulado e telas em jQuery
 - [x] API nova: modelo de dados (Prisma, inteiros, `CHECK` com os limites) e carga conferida centavo por centavo
 - [x] API nova: leitura (NestJS + Fastify): listagem, detalhe sem itens, itens por página, contratos em Zod e logs com o ID da requisição
-- [ ] API nova: rascunho no Redis e salvar só o que mudou
+- [x] API nova: rascunho no Redis (segura o bloqueio), edição por delta e “Salvar alterações” gravando só o changeset
 - [ ] API nova: Redis → Elasticsearch
 - [ ] Front (React + Vite + TanStack Query)
 - [ ] Ambiente “VPS” e benchmark
