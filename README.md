@@ -236,8 +236,8 @@ Uma edição vai só para o rascunho do usuário no Redis, e a API devolve os to
 
 ### 4. Dinheiro: float × decimal
 
-- **Problema:** O navegador calculava em float (JavaScript) e o servidor em decimal (C#), e os valores divergiam em centavos. Como **paliativo**, com o aval do cliente, passou-se a **arredondar sempre para cima em todo cálculo**: se fosse para errar, que errasse para cima e minimizasse as perdas.
-- **Impacto:** O valor visto pelo usuário não era o gravado; havia duas implementações da mesma regra. O paliativo só escondia o problema: em float até o arredondamento para cima falha (`1.1 * 100 = 110.00000000000001` → 111 centavos), e os totais ficavam enviesados para cima. Os problemas de cálculo chegaram a cortar funcionalidade: uma versão anterior tinha **desconto no total e por item**, e o desconto no total foi removido, ficando só o por item.
+- **Problema:** A lógica de cálculo existia **nos dois lados**, e cada um calculava um pedaço: o navegador (JavaScript, float) calculava o que estava carregado no DOM, para a edição responder na hora; o servidor (C#, decimal) fazia as operações que precisavam do orçamento inteiro, porque carregar milhares de linhas no DOM era lento demais. O total que o usuário via misturava os dois, e os valores divergiam em centavos. Como **paliativo**, com o aval do cliente, passou-se a **arredondar sempre para cima em todo cálculo**: se fosse para errar, que errasse para cima e minimizasse as perdas.
+- **Impacto:** O valor visto pelo usuário não era o gravado. Havia duas implementações da mesma regra, cada uma responsável por uma parte: para saber se um número estava certo, era preciso saber qual lado o tinha calculado, e qualquer mudança na regra precisava ser feita nos dois lugares sem desencaixar as partes. O paliativo só escondia o problema: em float até o arredondamento para cima falha (`1.1 * 100 = 110.00000000000001` → 111 centavos), e os totais ficavam enviesados para cima. Os problemas de cálculo chegaram a cortar funcionalidade: uma versão anterior tinha **desconto no total e por item**, e o desconto no total foi removido, ficando só o por item.
 - **Solução:**
   - Valores em **centavos inteiros** (×100) e percentuais em **pontos-base inteiros** (5,5% = 550); colunas `Int`/`BigInt`, nunca `Float`
   - Soma, subtração e preço × quantidade são exatas. Só há arredondamento onde há **divisão** (aplicar desconto, prazo e margem), com **uma regra padrão**, o **arredondamento comercial** (meio centavo para cima), o mesmo que o cliente já usa ao conferir à mão, igual no front e no back
@@ -310,7 +310,7 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 
 ### 8. Sem testes na parte mais crítica
 
-- **Problema:** ⟨O cálculo vivia no front, em JavaScript que lia e escrevia o DOM. Não havia testes no front.⟩
+- **Problema:** O cálculo estava dividido entre o front (JavaScript que lia e escrevia o DOM) e o back (C#), cada lado com uma parte da regra. Não havia testes no front, a parte mais crítica.
 - **Impacto:** ⟨Erros de valor só apareciam em uso; mudar a regra era arriscado.⟩
 - **Solução:**
   - ⟨Regra em funções puras de TypeScript (`packages/money`, `packages/budget-calc`), sem DOM nem banco⟩
