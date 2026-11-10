@@ -12,7 +12,13 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "infra:up": "docker compose up -d --wait",
+    "infra:down": "docker compose down",
+    "infra:reset": "docker compose down -v && docker compose up -d --wait",
+    "infra:ps": "docker compose ps",
+    "redis:cache": "docker compose exec redis-cache redis-cli",
+    "redis:data": "docker compose exec redis-data redis-cli"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

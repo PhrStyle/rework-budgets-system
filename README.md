@@ -37,7 +37,7 @@
 ## Em 30 segundos
 
 - **Antes:** Razor Pages + jQuery + `localStorage`, com o orçamento inteiro recalculado no navegador, float no JS contra decimal no C#, e um sistema que era aceitável em dev e lento na VPS dos EUA.
-- **Depois:** o servidor calcula com **inteiros**, por **delta**; o orçamento quente fica no **Redis**; a busca vai para o **Elasticsearch**; o front só exibe.
+- **Depois:** a edição vai para um **rascunho no Redis** e só vira oficial em “Salvar alterações”; o servidor calcula com **inteiros**, por **delta**; a busca vai para o **Elasticsearch**; o front só exibe.
 - **Resultado:** ⟨1 frase com o principal ganho medido, ex.: “abrir um grupo de 5 mil itens: X s → Y ms no ambiente emulado da VPS”⟩.
 
 <!-- GIF curto: abrir orçamento grande na legada vs nova, lado a lado (docs/img/antes-depois.gif) -->
@@ -76,7 +76,9 @@ As duas versões implementam as mesmas regras; só muda **como**.
 | Orçamento | `(Σ grupos + Σ totais dos filhos) → aplica o ajuste de prazo % → aplica a margem %`, nessa ordem, cada um sobre o resultado anterior |
 | Orçamento filho | Um orçamento pode conter outros, **no máximo 1 nível**. O filho entra no pai pelo **próprio total**, já com o prazo e a margem dele; o pai aplica os seus por cima |
 | Status | Rascunho, Enviado, Aprovado, Perdido. Apenas organizacional: não muda cálculo nem permissões |
-| Edição | Um orçamento aberto por um usuário fica bloqueado para os demais usuários |
+| Edição | As alterações ficam num **rascunho** do usuário e só viram oficiais ao clicar em **“Salvar alterações”**; “Descartar” desfaz tudo. Não há salvamento automático |
+| Rascunho | Fica no servidor e sobrevive a navegador fechado ou queda de energia por **30 minutos** desde a última edição. Várias abas do mesmo usuário editam o mesmo rascunho |
+| Bloqueio | Enquanto existe o rascunho, o orçamento fica bloqueado para os demais usuários (só visualizam). Bloqueio e rascunho expiram juntos |
 | Grupos | Servem para organizar e carregar sob demanda. Vários grupos podem ser abertos, vistos e editados **ao mesmo tempo** |
 | Arredondamento | Comercial (meio centavo para cima), só onde há divisão: no item, depois do prazo e depois da margem. Cada linha exibida é um valor real e as linhas somam o total ([ADR 0003](docs/adr/0003-arredondamento-a-cada-passo.md)) |
 
@@ -95,8 +97,9 @@ As duas versões implementam as mesmas regras; só muda **como**.
 | 7 | Tela complexa em jQuery (inserir acima/abaixo, reordenar) misturada ao cálculo | Difícil de manter e de evoluir | Front só exibe estado; reordenação por índice fracionário | ⟨front⟩ | — |
 | 8 | Sem testes no front, justamente onde ficava o cálculo (a parte mais crítica) | Regressões em valores só apareciam em uso | Cálculo em funções puras de TypeScript, compartilhadas e cobertas por testes | `packages/money` · Vitest | — |
 | 9 | Após cada deploy, o navegador usava o JS antigo em cache com o back-end novo; solução era Ctrl+F5 | Telas quebradas que pareciam bugs; perda de confiança no time | Arquivos com hash no nome, `index.html` sem cache, versão da API checada pelo front, contratos compartilhados | Vite · `packages/contracts` | — |
-| 10 | Orçamento marcado como "aberto" no banco para bloquear outros usuários; o mesmo usuário em várias abas ficava com estados divergentes | Abas desatualizadas salvando por cima uma da outra | ⟨Bloqueio de edição com expiração no Redis⟩ + versão por grupo (409) + sincronização entre abas | Redis · `BroadcastChannel` · TanStack Query | — |
-| 11 | Salvar enviava o orçamento **inteiro** (ex.: 12 grupos e 500+ produtos para mudar um) | Salvamentos lentos e transações enormes para mudanças pequenas | `PATCH` só do que mudou, transação pequena, envio em lote das edições | NestJS · Postgres · Redis | — |
+| 10 | Orçamento marcado como "aberto" no banco para bloquear outros usuários; o mesmo usuário em várias abas ficava com estados divergentes | Abas desatualizadas salvando por cima uma da outra | Rascunho único por usuário no servidor, compartilhado pelas abas; bloqueio com expiração preso ao rascunho | Redis · TanStack Query | — |
+| 11 | Salvar enviava o orçamento **inteiro** (ex.: 12 grupos e 500+ produtos para mudar um) | Salvamentos lentos e transações enormes para mudanças pequenas | Salvar grava só o *changeset* do rascunho, numa transação | NestJS · Postgres · Redis | — |
+| 12 | Edições só na página e no `localStorage` até salvar; para não perder trabalho, salvamento automático a cada 5 minutos | Queda de energia ou navegador fechado perdia o progresso; o salvamento automático gravava simulações indesejadas | Rascunho no servidor (Redis) e botão “Salvar alterações”; sem salvamento automático | Redis · NestJS | — |
 
 ### Por que trocar de stack?
 
@@ -150,16 +153,17 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  B[Navegador<br/>só exibe] -- "PATCH pequeno + If-Match" --> A[API NestJS<br/>calcula com inteiros]
-  A --> P[(PostgreSQL<br/>fonte da verdade)]
-  A <--> R[(Redis<br/>orçamento quente)]
+  B[Navegador<br/>só exibe] -- "edição: PATCH pequeno" --> A[API NestJS<br/>calcula com inteiros]
+  A <--> D[(Redis data<br/>rascunho do usuário)]
+  A -- "Salvar alterações:<br/>só o changeset" --> P[(PostgreSQL<br/>fonte da verdade)]
+  A <--> R[(Redis cache<br/>cópias do banco)]
   A -- evento --> Q[BullMQ worker]
   Q --> E[(Elasticsearch<br/>busca)]
   B -- "busca" --> A
   A -- "consulta" --> E
 ```
 
-⟨2–3 frases sobre o fluxo de uma edição e o fluxo de leitura⟩
+Uma edição vai só para o rascunho do usuário no Redis, e a API devolve os totais recalculados por delta. “Salvar alterações” grava no Postgres, numa transação, apenas o que mudou, e publica a reindexação no Elasticsearch por fila. A tela do orçamento lê do rascunho, do cache e do Postgres; a listagem e a busca leem do Elasticsearch.
 
 ---
 
@@ -352,32 +356,32 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 - **Problema:** Para evitar que dois usuários editassem o mesmo orçamento, ele era marcado como **aberto** no banco ao ser aberto, e os outros usuários eram impedidos de abri-lo. Isso não cobria o próprio usuário: abrindo o mesmo orçamento em **várias abas**, como o estado dependia do `localStorage` e de alterações na página, cada aba tinha a sua versão e só uma ficava salva.
 - **Impacto:** Abas desatualizadas e descompassadas; alterações de uma aba se perdiam ou sobrescreviam as de outra.
 - **Solução:**
-  - ⟨**Bloqueio do orçamento com expiração** no Redis (`SET NX` + TTL renovado por *heartbeat*), no lugar da marcação no banco. A regra continua a mesma (um usuário por orçamento), mas se o navegador fechar, o bloqueio expira sozinho; a tela mostra “em edição por ⟨usuário⟩”⟩
-  - ⟨**Versão por grupo:** cada `PATCH` envia `If-Match`; uma aba com versão velha daquele grupo recebe 409 e recarrega só o grupo. Como a versão é por grupo, editar grupos diferentes ao mesmo tempo (inclusive em abas diferentes) não gera conflito falso⟩
-  - ⟨**Abas sincronizadas:** após salvar, a aba avisa as outras via `BroadcastChannel`, que invalidam o cache do TanStack Query; ao ganhar foco, a aba revalida⟩
+  - O estado da edição sai do navegador e vai para um **rascunho único por usuário no servidor** ([ADR 0004](docs/adr/0004-rascunho-de-edicao-no-redis.md)). Todas as abas editam o mesmo rascunho, então não há mais duas versões para divergir.
+  - **O rascunho segura o bloqueio:** a marcação “aberto” no banco vira um bloqueio no Redis (`SET NX` com TTL) que expira junto com o rascunho, 30 minutos após a última edição. Fechar o navegador não deixa mais o orçamento travado para sempre.
+  - ⟨**Versão por grupo no rascunho:** cada edição envia a versão do grupo que a aba viu; uma aba com versão velha recebe 409 e recarrega o grupo, sem sobrescrever a outra⟩
+  - ⟨**Abas atualizadas:** após cada edição, as outras abas recebem o aviso (`BroadcastChannel`) e recarregam do rascunho⟩
 
 - **Resultado:**
 
 | Métrica | Antes | Depois |
 |---|---|---|
 | Edições perdidas entre abas (teste automatizado) | — | 0 |
-| Bloqueios “presos” após fechar o navegador | — | 0 (expiram em ⟨N⟩ s) |
+| Bloqueios “presos” após fechar o navegador | — | 0 (expiram em 30 min) |
 | Conflitos detectados e recarregados | — | — |
 
-- **Trade-offs:** ⟨O bloqueio por orçamento impede dois usuários de trabalharem em paralelo no mesmo orçamento; foi mantido porque é a regra de negócio conhecida pelos usuários. A expiração troca “bloqueio preso para sempre” por “até ⟨N⟩ s após fechar a tela”.⟩
+- **Trade-offs:** ⟨O bloqueio por orçamento impede dois usuários de trabalharem em paralelo no mesmo orçamento; foi mantido porque é a regra de negócio conhecida pelos usuários. Um rascunho esquecido segura o bloqueio por até 30 minutos.⟩
 - **Onde ver:** ⟨…⟩
 
 ---
 
 ### 11. Salvar o orçamento inteiro para mudar um item
 
-- **Problema:** Para salvar, o front enviava ao back-end o orçamento **inteiro**: todos os grupos e todos os produtos. Num orçamento com 12 grupos e mais de 500 produtos, alterar um único item significava trafegar e gravar os 12 grupos e os 500+ produtos.
-- **Impacto:** Salvamentos extremamente lentos mesmo para mudanças pequenas, transações grandes no banco e payloads pesados cruzando a rede até a VPS.
+- **Problema:** No início, o sistema salvava **a cada alteração**, e cada salvamento enviava ao back-end o orçamento **inteiro**: todos os grupos e todos os produtos. Num orçamento com 12 grupos e mais de 500 produtos, alterar um único item significava trafegar e gravar os 12 grupos e os 500+ produtos.
+- **Impacto:** Ficou tão lento que a forma de editar mudou: o orçamento passou a ser carregado sob demanda (lazy loading) e editado em sessão no navegador, com o cálculo em JavaScript. Esse paliativo deu origem aos problemas 1, 2 e 12. O salvamento continuou enviando o orçamento inteiro.
 - **Solução:**
-  - ⟨`PATCH` só do campo alterado (`/items/:id`), com transação pequena: 1 item + o subtotal do grupo (delta)⟩
-  - ⟨Redis atualizado na mesma operação (*write-through*), sem varrer o orçamento⟩
-  - ⟨Edições feitas em sequência são agrupadas no front e enviadas em lote (`PATCH /groups/:gid/items`), economizando idas e voltas com RTT alto⟩
-  - ⟨Experimento opcional e medido: gravar no Redis e persistir no Postgres por fila (*write-behind*)⟩
+  - O rascunho guarda **só o que mudou** (o *changeset*): itens alterados, criados e removidos, e campos do cabeçalho.
+  - “Salvar alterações” aplica o changeset numa transação: grava as linhas alteradas e os subtotais dos grupos afetados, sem tocar no resto do orçamento.
+  - ⟨Experimento opcional e medido: persistir o changeset por fila (*write-behind*) em vez de na própria requisição⟩
 
 - **Resultado:**
 
@@ -387,7 +391,30 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 | Payload por salvamento | — | — |
 | Tempo de salvamento | — | — |
 
-- **Trade-offs:** ⟨*Write-behind* reduz a latência de escrita, mas um item pode ser perdido se o Redis cair antes de persistir (mitigado com AOF e confirmação da fila). Por isso a base é *write-through*.⟩
+- **Trade-offs:** ⟨Um salvamento com muitas alterações ainda grava muitas linhas, mas o custo passa a ser proporcional ao que mudou, não ao tamanho do orçamento.⟩
+- **Onde ver:** ⟨…⟩
+
+---
+
+### 12. Perder o progresso × salvar o que não devia
+
+- **Problema:** Depois que a edição passou a ficar em sessão, as alterações viviam só na página e no `localStorage` até o clique em salvar. Se o navegador fechasse, a energia caísse ou algo inesperado acontecesse, o progresso se perdia. Para contornar, entrou um **salvamento automático a cada 5 minutos**.
+- **Impacto:** O salvamento automático gravava estados intermediários e **simulações que o usuário não queria salvar**. Num sistema de cotação, simular valores sem compromisso é parte do trabalho. E o salvamento automático, como os outros, enviava o orçamento inteiro.
+- **Solução:**
+  - **Rascunho no servidor** (Redis), criado ao abrir o orçamento; toda edição vai para ele, com os totais recalculados na hora ([ADR 0004](docs/adr/0004-rascunho-de-edicao-no-redis.md)).
+  - **Sem salvamento automático:** o Postgres só recebe as alterações no clique em **“Salvar alterações”**; **“Descartar”** apaga o rascunho.
+  - O rascunho sobrevive a navegador fechado e queda de energia por **30 minutos** desde a última edição; ao reabrir, a tela avisa que há alterações não salvas.
+  - Rascunhos ficam no `redis-data` (`noeviction` + AOF): não são reconstruíveis a partir do banco, então não podem ser despejados nem perdidos num reinício do Redis.
+
+- **Resultado:**
+
+| Métrica | Antes | Depois |
+|---|---|---|
+| Progresso perdido ao fechar o navegador | tudo desde o último salvamento | nada (por até 30 min) |
+| Simulações gravadas sem o usuário pedir | a cada 5 min | nenhuma |
+| Salvamentos por sessão de edição | 1 a cada 5 min + manuais | só os manuais |
+
+- **Trade-offs:** ⟨Um rascunho abandonado expira em 30 minutos: é uma rede de segurança para imprevistos, não um lugar para guardar trabalho por dias. Em troca, o `redis-data` guarda dados do usuário e precisa de AOF e de monitoramento de memória.⟩
 - **Onde ver:** ⟨…⟩
 
 ---
@@ -400,7 +427,7 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 | **Calibração** | ⟨RTT medido de verdade do Brasil até uma VPS em US Central: X ms; CPU calibrada com benchmark⟩ |
 | **Carga** | ⟨k6, N usuários virtuais, cenários em `bench/`⟩ |
 | **Dados** | ⟨seed: N orçamentos, grupo grande com 5.000 itens⟩ |
-| **Legada** | Versão simplificada em ASP.NET Core Razor Pages + jQuery (`legacy/`), na stack original, reproduzindo os 11 problemas, contra o mesmo Postgres e os mesmos dados |
+| **Legada** | Versão simplificada em ASP.NET Core Razor Pages + jQuery (`legacy/`), na stack original, reproduzindo os 12 problemas, contra o mesmo Postgres e os mesmos dados |
 | **O que não está aqui** | ⟨limitações conhecidas da medição⟩ |
 
 Reproduzir:
@@ -420,7 +447,7 @@ Reproduzir:
 | TanStack Query | Estado vindo do servidor no front | ⟨…⟩ |
 | NestJS | API REST | ⟨…⟩ |
 | PostgreSQL + Prisma | Fonte da verdade | ⟨…⟩ |
-| Redis | Orçamento quente, totais atômicos, filas (BullMQ) | ⟨…⟩ |
+| Redis | Rascunhos de edição, cache, totais atômicos e filas (BullMQ), em duas instâncias: `redis-data` e `redis-cache` | ⟨…⟩ |
 | Elasticsearch | Listagem, filtros e autocomplete | ⟨…⟩ |
 | Vitest | Testes unitários e de integração | ⟨…⟩ |
 | Docker Compose | Ambiente local e ambiente “VPS” | ⟨…⟩ |
@@ -432,12 +459,29 @@ Reproduzir:
 
 ## Como rodar
 
+Requisitos: Node 22, pnpm 12 e Docker (com cerca de 2 GB de RAM livres para os serviços).
+
 ```bash
-⟨git clone …⟩
-⟨docker compose up -d⟩
-⟨pnpm install && pnpm db:seed && pnpm dev⟩
-⟨pnpm test⟩
+git clone https://github.com/PhrStyle/rework-budgets-system.git
+cd rework-budgets-system
+cp .env.example .env        # troque a senha; mude as portas se alguma já estiver em uso
+pnpm install
+pnpm infra:up               # Postgres, redis-cache, redis-data e Elasticsearch
+pnpm test
 ```
+
+| Comando | O que faz |
+|---|---|
+| `pnpm infra:up` / `infra:down` | Sobe ou para os serviços, mantendo os dados |
+| `pnpm infra:reset` | Apaga os volumes e começa do zero |
+| `pnpm redis:cache` / `redis:data` | Abre o `redis-cli` em cada instância |
+
+| Serviço | Porta local (padrão) | Configuração |
+|---|---|---|
+| PostgreSQL 18 | 54320 | Bancos `budgets_legacy` e `budgets_v2` |
+| `redis-cache` | 6379 | `allkeys-lru`, sem persistência: só cópias reconstruíveis |
+| `redis-data` | 6380 | `noeviction` + AOF: rascunhos de edição e filas |
+| Elasticsearch 9 | 9200 | Nó único, 512 MB de heap |
 
 ---
 
@@ -473,13 +517,14 @@ docs/adr/             decisões de arquitetura
 
 ## Status
 
-**Pronto =** as duas versões funcionando, com os 11 problemas reproduzidos na legada e resolvidos na nova, medidos e documentados.
+**Pronto =** as duas versões funcionando, com os 12 problemas reproduzidos na legada e resolvidos na nova, medidos e documentados.
 
 - [x] Protótipo visual (`prototype/index.html`)
 - [x] Repositório, CI e convenções
 - [x] `packages/money` + testes
 - [x] `packages/budget-calc` + casos compartilhados
-- [ ] Infra local (Docker Compose: Postgres, Redis, Elasticsearch)
+- [x] Infra local (Docker Compose: Postgres, `redis-cache`, `redis-data`, Elasticsearch)
+- [ ] Gerador de dados determinístico
 - [ ] Versão legada (ASP.NET Core Razor Pages + jQuery)
 - [ ] API nova: Postgres → Redis → Elasticsearch
 - [ ] Front (React + Vite + TanStack Query)
