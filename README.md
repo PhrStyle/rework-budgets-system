@@ -67,8 +67,11 @@ As duas versões implementam as mesmas regras; só muda **como**.
 
 | Regra | Definição |
 |---|---|
-| Item | `preço × quantidade × (1 − desconto do item %)` |
-| Desconto | **Só por item**, em %. Não há desconto no grupo nem no total |
+| Item | `preço por unidade × quantidade × (1 − desconto do item %)` |
+| Unidades | Cada produto tem a sua: **un** (só inteiros), **m**, **L** e **kg** (até 2 casas decimais) |
+| Desconto | **Só por item**, de 0% a 100%. Não há desconto no grupo nem no total |
+| Ajuste de prazo | De −100% a +100% (pode ser negativo) |
+| Margem | De 0% a +100% (reduções são feitas pelo desconto do item) |
 | Grupo | Soma dos itens |
 | Orçamento | `(Σ grupos + Σ totais dos filhos) → aplica o ajuste de prazo % → aplica a margem %`, nessa ordem, cada um sobre o resultado anterior |
 | Orçamento filho | Um orçamento pode conter outros, **no máximo 1 nível**. O filho entra no pai pelo **próprio total**, já com o prazo e a margem dele; o pai aplica os seus por cima |
@@ -238,7 +241,12 @@ flowchart LR
   - Pacote `packages/money` usado pela API (e pelo front, se houver resposta otimista)
 
 ```ts
-// ⟨colar a implementação final de packages/money⟩
+// packages/money: item = preço × qtd × (100% − desconto), uma única divisão no fim
+export function itemTotal(price: Cents, quantity: Qty, discount: Bp): Cents {
+  return cents(mulDivRoundHalfUp([price, quantity, BP_SCALE - discount], QTY_SCALE * BP_SCALE));
+}
+
+itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% → 342590 (R$ 3.425,90)
 ```
 
 - **Resultado:**
@@ -248,10 +256,10 @@ flowchart LR
 | Divergência tela × banco (orçamento de 5.000 itens) | — | R$ 0,00 |
 | Valor cobrado a mais pelo arredondamento para cima | — | R$ 0,00 (paliativo removido) |
 | Implementações da regra de cálculo | 2 | 1 |
-| Casos de teste de dinheiro | — | — |
+| Testes do pacote de dinheiro | 0 | 38 (com testes de propriedade contra `BigInt`), 100% das linhas |
 
 - **Trade-offs:** ⟨Trocar o “sempre para cima” por uma regra padrão muda os totais em alguns centavos em relação ao sistema antigo; a mudança precisa ser comunicada ao cliente, que tinha aprovado o paliativo.⟩
-- **Onde ver:** ⟨`packages/money`⟩ · ⟨ADR: `docs/adr/0001-dinheiro-em-inteiros.md`⟩
+- **Onde ver:** [`packages/money`](packages/money/src) · [ADR 0001](docs/adr/0001-dinheiro-em-inteiros.md) · [ADR 0002](docs/adr/0002-pacote-proprio-de-dinheiro.md)
 
 ---
 
@@ -466,8 +474,8 @@ docs/adr/           decisões de arquitetura
 **Pronto =** as duas versões funcionando, com os 11 problemas reproduzidos na legada e resolvidos na nova, medidos e documentados.
 
 - [x] Protótipo visual (`prototype/index.html`)
-- [ ] Repositório, CI e convenções
-- [ ] `packages/money` + testes
+- [x] Repositório, CI e convenções
+- [x] `packages/money` + testes
 - [ ] Infra local (Docker Compose: Postgres, Redis, Elasticsearch)
 - [ ] Versão legada (ASP.NET Core Razor Pages + jQuery)
 - [ ] API nova: Postgres → Redis → Elasticsearch
