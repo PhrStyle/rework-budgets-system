@@ -94,6 +94,30 @@ services:
       timeout: 5s
       retries: 40
 
+  # Rastreamento de erros (perfil opcional: pnpm obs:up). GlitchTip é um servidor de código aberto
+  # compatível com o Sentry: a API e a tela usam o SDK oficial do Sentry, e em produção basta trocar o
+  # DSN pelo do Sentry. Só para desenvolvimento local: DEBUG ligado e um usuário de teste criado
+  # pelo próprio GlitchTip (bootstrap_dev). Usa o Postgres acima, num banco próprio, sem Redis
+  # (por isso o `pnpm obs:up` cria antes a tabela de cache, que uma migração do GlitchTip usa).
+  glitchtip:
+    image: glitchtip/glitchtip:6.2
+    profiles: [observabilidade]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/glitchtip
+      VALKEY_URL: ''
+      SECRET_KEY: ${GLITCHTIP_SECRET_KEY:-somente-desenvolvimento-local}
+      GLITCHTIP_DOMAIN: http://127.0.0.1:${GLITCHTIP_PORT:-8000}
+      SERVER_ROLE: all_in_one
+      DEBUG: 'true'
+      GLITCHTIP_BOOTSTRAP_DEV: 'true'
+      ENABLE_USER_REGISTRATION: 'false'
+    ports:
+      - '127.0.0.1:${GLITCHTIP_PORT:-8000}:8000'
+    mem_limit: 768m
+
 volumes:
   postgres-data:
   redis-data:

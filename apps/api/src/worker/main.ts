@@ -1,6 +1,7 @@
 import { pino } from 'pino';
 
 import { createPrisma } from '../db/prisma.js';
+import { createReporter } from '../errors/reporter.js';
 import { elasticsearchUrl, redisDataUrl } from '../db/url.js';
 import { createElastic } from '../search/elastic.js';
 import { ElasticIndexer } from '../search/elastic-indexer.js';
@@ -14,6 +15,12 @@ const logger = pino({
       : { target: 'pino-pretty', options: { singleLine: true } },
 });
 const prisma = createPrisma();
+const reporter = createReporter({
+  dsn: process.env.SENTRY_DSN || undefined,
+  release: process.env.APP_VERSION ?? 'local',
+  environment: process.env.NODE_ENV ?? 'development',
+  service: 'worker',
+});
 const worker = await startWorker({
   redisDataUrl: redisDataUrl(),
   prisma,
@@ -22,6 +29,7 @@ const worker = await startWorker({
   logger,
   relayEveryMs: 500,
   driftCheckCron: process.env.DRIFT_CHECK_CRON ?? '0 3 * * *',
+  reporter,
 });
 logger.info('worker no ar: outbox → fila → Elasticsearch, e conferência de drift agendada');
 
@@ -31,6 +39,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     logger.info({ signal }, 'desligando o worker');
     void worker
       .close()
+      .then(() => reporter.flush())
       .then(() => prisma.$disconnect())
       .then(() => process.exit(0));
   });

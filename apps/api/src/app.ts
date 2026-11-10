@@ -17,6 +17,7 @@ import { DraftSaver } from './drafts/draft-saver.js';
 import { DRAFT_TTL_MS, DraftStore } from './drafts/draft.store.js';
 import { DraftsController } from './drafts/drafts.controller.js';
 import { DraftsService } from './drafts/drafts.service.js';
+import type { ErrorReporter } from './errors/reporter.js';
 import { ApiErrorFilter } from './http/api-error.filter.js';
 import { REQUEST_ID_HEADER, requestId } from './http/request-id.js';
 import { Metrics, MetricsController } from './metrics/metrics.js';
@@ -37,6 +38,8 @@ export interface AppConfig {
   logLevel: string;
   /** Logs legíveis no terminal (dev); JSON de uma linha nos demais casos. */
   prettyLogs: boolean;
+  /** Para onde vão os erros inesperados (Sentry/GlitchTip); sem isso, só o log. */
+  reporter?: ErrorReporter;
 }
 
 @Module({})
@@ -99,7 +102,7 @@ export async function createApp(config: AppConfig): Promise<NestFastifyApplicati
   app.useLogger(app.get(Logger));
   app.setGlobalPrefix('api');
   app.useGlobalPipes(new StandardSchemaValidationPipe());
-  app.useGlobalFilters(new ApiErrorFilter());
+  app.useGlobalFilters(new ApiErrorFilter(config.reporter));
   app.enableShutdownHooks();
   return app;
 }

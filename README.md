@@ -191,22 +191,6 @@ O que a tabela mostra: com uma rede de verdade no caminho, cada ida custa ~150 m
 
 Resultados brutos: `bench/results/*.json` (gerados pelo k6, fora do git). Medido na máquina do autor (12 núcleos, Docker rootless), com outros containers rodando: há algum ruído, menor que as diferenças medidas.
 
----|---|---|---|
-| Abrir orçamento (cabeçalho + grupos) | — | — | — |
-| Abrir grupo com 5.000 itens | — | — | — |
-| Editar 1 quantidade: tela atualiza | — | — | — |
-| Editar 1 quantidade: salvo no servidor | — | — | — |
-| Alterar margem (%) | — | — | — |
-| Reordenar 1 item | — | — | — |
-| Buscar orçamentos (p95) | — | — | — |
-| Payload por edição | — | — | — |
-| CPU do servidor por salvamento | — | — | — |
-| Throughput com N usuários (req/s) | — | — | — |
-| Divergência de centavos (tela × banco) | — | R$ 0,00 | — |
-| Edições concorrentes detectadas | — | — | — |
-
-<!-- gráfico gerado do resultado do k6: docs/img/benchmark.png -->
-
 **Demo visual:** [`prototype/index.html`](prototype/index.html) mostra as duas versões funcionando (abra no navegador). Os números do protótipo são parcialmente simulados; os desta tabela vêm do benchmark real.
 
 ---
@@ -289,14 +273,6 @@ Uma edição vai só para o rascunho do usuário no Redis, e a API devolve os to
 - **Trade-offs:** O cache guarda o grupo inteiro e pagina em memória: um grupo enorme custa uma chave grande (357 itens ≈ 60 KB no perfil de estresse). O detalhe ainda faz uma consulta curta ao Postgres para saber a versão (a hora da última gravação) antes de ir ao cache. Localmente o ganho é pequeno em valor absoluto; ele importa com carga e com o banco mais longe, o que a etapa 9 mede.
 - **Onde ver:** legada: `carregarItens()` em [`orcamento.js`](legacy/src/Budgets.Legacy.Web/wwwroot/js/orcamento.js). Reproduzido: como o salvar apaga e regrava os grupos com ids novos, o `localStorage` fica com chaves de grupos que não existem mais (15 chaves órfãs depois de um salvamento no pior caso) · nova: [`cache.ts`](apps/api/src/cache/cache.ts), uso em [`budgets.service.ts`](apps/api/src/budgets/budgets.service.ts), testes em [`cache.test.ts`](apps/api/src/cache/cache.test.ts) (inclusive com o Redis derrubado no meio), métricas em `GET /api/metrics`
 
----|---|---|
-| Abrir grupo de 5.000 itens | — | — |
-| Hit ratio do cache | — | — |
-| Armazenamento no navegador | — | 0 B |
-
-- **Trade-offs:** ⟨Consistência Redis × Postgres: Postgres sempre ganha; job que recalcula do zero e mede drift.⟩
-- **Onde ver:** legada: `carregarItens()` em [`orcamento.js`](legacy/src/Budgets.Legacy.Web/wwwroot/js/orcamento.js). Reproduzido: como o salvar apaga e regrava os grupos com ids novos, o `localStorage` fica com chaves de grupos que não existem mais (15 chaves órfãs depois de um salvamento no pior caso) · nova: `GET /api/budgets/:id/groups/:groupId/items` em [`budgets.controller.ts`](apps/api/src/budgets/budgets.controller.ts)
-
 ---
 
 ### 3. Busca e filtro de orçamentos
@@ -324,13 +300,6 @@ Uma edição vai só para o rascunho do usuário no Redis, e a API devolve os to
 
 - **Trade-offs:** Nesta escala (3.201 orçamentos, 5.500 produtos), **a velocidade empata**, e a listagem sem busca é até mais lenta; o ganho é o que a busca **acha**. Em troca, a busca é eventual: ~1 s entre salvar e aparecer, quase todo o *refresh* de 1 s do Elasticsearch, mais o relay (até 500 ms); o detalhe do orçamento continua lendo do Postgres e do cache, sempre exato. É mais um serviço para operar (memória, disco, reindexação).
 - **Onde ver:** legada: [`OrcamentosController.Listar`](legacy/src/Budgets.Legacy.Api/Controllers/OrcamentosController.cs) e [`CatalogoController.Produtos`](legacy/src/Budgets.Legacy.Api/Controllers/CatalogoController.cs) (`ILIKE '%termo%'`) · nova: índices e analisadores em [`indices.ts`](apps/api/src/search/indices.ts), consultas em [`search.service.ts`](apps/api/src/search/search.service.ts), indexação em [`elastic-indexer.ts`](apps/api/src/search/elastic-indexer.ts), outbox e relay em [`relay.ts`](apps/api/src/worker/relay.ts), worker em [`worker.ts`](apps/api/src/worker/worker.ts); testes em [`search.test.ts`](apps/api/src/search/search.test.ts) (cada caso compara com o `ILIKE` da legada) e [`worker.test.ts`](apps/api/src/worker/worker.test.ts)
-
----|---|---|
-| Busca p95 | — | — |
-| Autocomplete p95 | — | — |
-
-- **Trade-offs:** Consistência eventual: a busca reflete o salvar com algum atraso. Medido localmente: **67 a 429 ms**, dominado pelo intervalo em que o relay olha o outbox (500 ms; `LISTEN/NOTIFY` do Postgres reduziria isso). Com o worker desligado, o salvar continua respondendo (~15–25 ms) e os avisos esperam no outbox; ao religar, ele processa tudo. ⟨Atraso do Elasticsearch: etapa 7b⟩
-- **Onde ver:** legada: [`OrcamentosController.Listar`](legacy/src/Budgets.Legacy.Api/Controllers/OrcamentosController.cs) e [`CatalogoController.Produtos`](legacy/src/Budgets.Legacy.Api/Controllers/CatalogoController.cs) (`ILIKE '%termo%'`) · nova: outbox e relay em [`relay.ts`](apps/api/src/worker/relay.ts), worker em [`worker.ts`](apps/api/src/worker/worker.ts), testes em [`worker.test.ts`](apps/api/src/worker/worker.test.ts) (worker que morre no meio, destino fora do ar, dois relays ao mesmo tempo) · ⟨Elasticsearch: etapa 7b⟩
 
 ---
 
@@ -465,18 +434,10 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 | Ctrl+F5 necessário após deploy | sim, recorrente | não (conferido: deploy da versão B com a aba aberta na A; aviso ao voltar para a aba; “Recarregar” trouxe o JS novo) |
 | Cache do JS | 7 dias, sem versão no nome | 1 ano, com o hash no nome (o nome muda a cada versão) |
 | Cache do `index.html` | — | `no-cache`: sempre revalida |
-| Erros no Sentry nas primeiras horas após deploy | — | — |
+| Erros depois do deploy | só quando o usuário reclamava | no Sentry, com a versão do build em cada erro: dá para ver “começou na versão X” (conferido com o GlitchTip local; a contagem real depende de usuários reais) |
 
 - **Trade-offs:** Uma SPA separa front e back em dois artefatos, o que **aumenta** o risco de descompasso de versões se nada for feito; a mitigação precisa existir desde o primeiro deploy. O aviso depende de o usuário clicar: uma aba esquecida aberta continua na versão antiga até lá (ela só não quebra se a API se mantiver compatível). Os cabeçalhos de cache estão no `vite preview`; na etapa 9, o nginx da “VPS” repete as mesmas regras.
 - **Onde ver:** legada: [`Program.cs` do front](legacy/src/Budgets.Legacy.Web/Program.cs) (scripts com cache de 7 dias) e a tag do script em [`Orcamento.cshtml`](legacy/src/Budgets.Legacy.Web/Pages/Orcamento.cshtml), sem versão no nome. O próprio ASP.NET já oferecia a correção (`asp-append-version`), que o sistema não usava · nova: [`vite.config.ts`](apps/web/vite.config.ts) (versão, `version.json` e cabeçalhos), [`version.ts`](apps/web/src/version.ts) e [`NewVersion.tsx`](apps/web/src/components/NewVersion.tsx); testes em [`editar.spec.ts`](apps/web/e2e/editar.spec.ts) (cabeçalhos no navegador) e [`NewVersion.test.tsx`](apps/web/src/components/NewVersion.test.tsx)
-
----|---|---|
-| Ctrl+F5 necessário após deploy | sim, recorrente | — |
-| Erros no Sentry nas primeiras horas após deploy | — | — |
-| Tempo até todos os usuários estarem na versão nova | — | — |
-
-- **Trade-offs:** ⟨Uma SPA separa front e back em dois artefatos, o que **aumenta** o risco de descompasso de versões se nada for feito. A mitigação acima precisa existir desde o primeiro deploy.⟩
-- **Onde ver:** legada: [`Program.cs` do front](legacy/src/Budgets.Legacy.Web/Program.cs) (scripts com cache de 7 dias) e a tag do script em [`Orcamento.cshtml`](legacy/src/Budgets.Legacy.Web/Pages/Orcamento.cshtml), sem versão no nome. O próprio ASP.NET já oferecia a correção (`asp-append-version`), que o sistema não usava · ⟨nova: configuração do Vite e aviso de versão⟩
 
 ---
 
@@ -618,20 +579,6 @@ bash bench/run.sh legada usuario && bash bench/run.sh nova usuario && python3 be
 bash bench/run.sh legada carga && bash bench/run.sh nova carga && python3 bench/relatorio.py carga
 ```
 
----|---|
-| **Ambiente “VPS”** | ⟨Docker com `--cpus=4 --memory=8g`; latência e banda injetadas entre o cliente e a API⟩ |
-| **Calibração** | ⟨RTT medido de verdade do Brasil até uma VPS em US Central: X ms; CPU calibrada com benchmark⟩ |
-| **Carga** | ⟨k6, N usuários virtuais, cenários em `bench/`⟩ |
-| **Dados** | Gerador determinístico ([`packages/seed`](packages/seed/src/generate.ts)), semente fixa: 3.200 orçamentos e 426 mil itens; 5.500 produtos (un, m, L, kg); 2.200 clientes; 60% pequenos (até 60 itens), 30% médios (até 300), 9,5% grandes (12 grupos, 300 a 800 itens), 16 no pior caso real (15 grupos, 1.000 itens) e 1 de estresse sintético (5.000 itens, acima do real); 40% contêm uma versão anterior. Um teste trava o hash da saída |
-| **Legada** | Versão simplificada em ASP.NET Core Razor Pages + jQuery (`legacy/`), na stack original, reproduzindo os 14 problemas, contra o mesmo Postgres e os mesmos dados |
-| **O que não está aqui** | ⟨limitações conhecidas da medição⟩ |
-
-Reproduzir:
-
-```bash
-⟨docker compose -f compose.yml -f compose.vps.yml up -d && pnpm bench⟩
-```
-
 ---
 
 ## Stack e por quê
@@ -648,7 +595,7 @@ Reproduzir:
 | Vitest · Testing Library · Playwright | Testes unitários, de integração, de componentes e no navegador | Vitest roda a API e os pacotes em Node e a tela em DOM simulado; Playwright faz o fluxo principal num Chromium de verdade, contra o build de produção |
 | Docker Compose | Ambiente local e ambiente “VPS” | Sobe a infraestrutura igual para todo mundo; com o `compose.vps.yaml`, a pilha inteira com os limites da VPS |
 | Toxiproxy · k6 | Emular rede de produção e medir | Toxiproxy injeta latência e banda entre o usuário e a aplicação; k6 repete o que o navegador de cada versão faz, com 1 e com 16 usuários |
-| Sentry · Prometheus · pino | Erros, métricas e logs estruturados com ID de requisição | ⟨…⟩ |
+| Sentry · Prometheus · pino | Erros, métricas e logs estruturados com ID de requisição | Sentry (SDK oficial) na API, no worker e na tela; localmente vai para o GlitchTip (compatível, sem conta externa). O mesmo `request_id` no erro da tela, no erro do servidor e no log liga os três. Métricas no formato do Prometheus em `/api/metrics` |
 | ASP.NET Core Razor Pages · jQuery | Versão legada (reprodução) | Medir o “antes” na stack original, não numa imitação |
 
 ---
@@ -684,6 +631,7 @@ pnpm test
 | `pnpm v2:web` | Sobe a tela nova em `http://127.0.0.1:5173` (precisa da API no ar; o Vite repassa `/api` para ela) |
 | `pnpm v2:web:prod` | Build de produção da tela servido em `http://127.0.0.1:4173`, com os cabeçalhos de cache e o `version.json` |
 | `pnpm v2:e2e` | Testes no navegador (Playwright): editar e salvar, descartar e os cabeçalhos de cache; sobe a API e a tela se não estiverem no ar |
+| `pnpm obs:up` · `pnpm obs:dsn` | Sobe o GlitchTip (compatível com o Sentry) em `http://127.0.0.1:8000` e mostra o DSN de desenvolvimento; com `SENTRY_DSN` (API e worker) e `VITE_SENTRY_DSN` (build da tela), os erros vão para lá |
 | `pnpm v2:check` | Conferência de drift: recalcula do zero cada total guardado e aponta divergências |
 | `pnpm v2:seed full` | Aplica as migrations (Prisma) e carrega os dados no banco da versão nova (`budgets_v2`); relê tudo pelo Prisma e confere cada total com o gerador |
 
@@ -750,4 +698,5 @@ docs/adr/             decisões de arquitetura
 - [x] Tela nova: edição em rascunho (cabeçalho, itens, inserir acima/abaixo, arrastar, grupos), barra com Salvar/Descartar e abas sincronizadas
 - [x] Tela nova: deploy sem cache velho (hash no nome, `no-cache` no `index.html`, aviso de versão nova) e testes de componentes e no navegador
 - [x] Ambiente “VPS” (4 CPUs, 8 GB, rede emulada) e benchmark com k6 das duas versões
+- [x] Rastreamento de erros: Sentry na API, no worker e na tela (GlitchTip local), ligados pelo `request_id`
 - [ ] README preenchido com os números

@@ -4,6 +4,8 @@ import { Redis } from 'ioredis';
 import type { Logger } from 'pino';
 
 import { verifyTotals } from '../db/verify.js';
+import { noopReporter } from '../errors/reporter.js';
+import type { ErrorReporter } from '../errors/reporter.js';
 import type { PrismaClient } from '../generated/prisma/client.js';
 import {
   BUDGET_CHANGED,
@@ -31,6 +33,8 @@ export interface WorkerConfig {
   stalledIntervalMs?: number;
   /** Espera inicial entre tentativas (os testes usam pouco). */
   backoffMs?: number;
+  /** Tarefas que esgotaram as tentativas e drift encontrado vão para o Sentry. */
+  reporter?: ErrorReporter;
 }
 
 export interface RunningWorker {
@@ -47,6 +51,7 @@ export interface RunningWorker {
  */
 export async function startWorker(config: WorkerConfig): Promise<RunningWorker> {
   const { prisma, indexer, logger } = config;
+  const reporter = config.reporter ?? noopReporter;
   // O BullMQ pede `maxRetriesPerRequest: null` nas conexões de worker (comandos bloqueantes).
   const connection = new Redis(config.redisDataUrl, { maxRetriesPerRequest: null });
   const defaultJobOptions = {
@@ -87,6 +92,10 @@ export async function startWorker(config: WorkerConfig): Promise<RunningWorker> 
         Object.fromEntries(stored.map((s) => [s.id, Number(s.totalCents)])),
       );
       if (report.mismatches.length > 0) {
+        reporter.message('drift: totais guardados divergem do recálculo', {
+          tags: { queue: MAINTENANCE_QUEUE },
+          extra: { count: report.mismatches.length, sample: report.mismatches.slice(0, 20) },
+        });
         logger.warn(
           { mismatches: report.mismatches.slice(0, 20), count: report.mismatches.length },
           'drift encontrado',
@@ -105,6 +114,14 @@ export async function startWorker(config: WorkerConfig): Promise<RunningWorker> 
         { queue: w.name, jobId: job?.id, attempt: job?.attemptsMade, error: error.message },
         'tarefa falhou',
       );
+      // Falha que se resolve na próxima tentativa é o sistema funcionando; esgotar as tentativas,
+      // não: a tarefa fica em "failed" e alguém precisa olhar.
+      if (job && job.attemptsMade >= (job.opts.attempts ?? 1)) {
+        reporter.capture(error, {
+          tags: { queue: w.name, job: job.name },
+          extra: { jobId: job.id, data: job.data, attempts: job.attemptsMade },
+        });
+      }
     });
     w.on('stalled', (jobId) => {
       logger.warn(
