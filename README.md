@@ -280,7 +280,7 @@ Uma edição vai só para o rascunho do usuário no Redis, e a API devolve os to
 | Autocomplete p95 | — | — |
 
 - **Trade-offs:** ⟨Consistência eventual: a listagem pode atrasar alguns segundos; lag exposto como métrica.⟩
-- **Onde ver:** ⟨…⟩
+- **Onde ver:** legada: [`OrcamentosController.Listar`](legacy/src/Budgets.Legacy.Api/Controllers/OrcamentosController.cs) e [`CatalogoController.Produtos`](legacy/src/Budgets.Legacy.Api/Controllers/CatalogoController.cs) (`ILIKE '%termo%'`) · ⟨nova: …⟩
 
 ---
 
@@ -421,7 +421,7 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 | Conflitos detectados e recarregados | — | — |
 
 - **Trade-offs:** ⟨O bloqueio por orçamento impede dois usuários de trabalharem em paralelo no mesmo orçamento; foi mantido porque é a regra de negócio conhecida pelos usuários. Um rascunho esquecido segura o bloqueio por até 30 minutos.⟩
-- **Onde ver:** ⟨…⟩
+- **Onde ver:** legada: [`OrcamentosController.Abrir`](legacy/src/Budgets.Legacy.Api/Controllers/OrcamentosController.cs) (marcação “aberto” que expira em 30 min) · ⟨nova: …⟩
 
 ---
 
@@ -438,12 +438,13 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 
 | Métrica | Antes | Depois |
 |---|---|---|
-| Linhas gravadas para alterar 1 item (12 grupos, 500+ produtos) | 500+ | — |
+| Salvar 1 alteração no pior caso real (15 grupos, 1.000 itens) · rede local | 177 KB enviados, ~320 ms, 1.000 itens apagados e regravados | — |
+| Salvar 1 alteração no perfil de estresse (5.000 itens, acima do real) · rede local | 878 KB enviados, ~1,8 s, 5.000 itens apagados e regravados | — |
 | Payload por salvamento | — | — |
 | Tempo de salvamento | — | — |
 
 - **Trade-offs:** ⟨Um salvamento com muitas alterações ainda grava muitas linhas, mas o custo passa a ser proporcional ao que mudou, não ao tamanho do orçamento.⟩
-- **Onde ver:** ⟨…⟩
+- **Onde ver:** legada: [`OrcamentosController.Salvar`](legacy/src/Budgets.Legacy.Api/Controllers/OrcamentosController.cs) (apaga e regrava tudo numa transação) · ⟨nova: …⟩
 
 ---
 
@@ -571,6 +572,7 @@ pnpm test
 | `pnpm redis:cache` / `redis:data` | Abre o `redis-cli` em cada instância |
 | `pnpm seed:generate -- --profile small` | Gera um conjunto pequeno (60 orçamentos), o mesmo usado nos testes |
 | `pnpm legacy:seed full` | Carrega os dados no banco da legada (`budgets_legacy`) e compara os totais com a regra nova |
+| `pnpm legacy:api` | Sobe a API do back da legada em `http://127.0.0.1:5080` (Swagger em `/swagger`) |
 | `pnpm legacy:test` | Testes da legada (xUnit + Testcontainers; precisa de Docker) |
 
 | Serviço | Porta local (padrão) | Configuração |
@@ -624,7 +626,8 @@ docs/adr/             decisões de arquitetura
 - [x] Infra local (Docker Compose: Postgres, `redis-cache`, `redis-data`, Elasticsearch)
 - [x] Gerador de dados determinístico
 - [x] Versão legada: modelo (EF Core, `decimal`), cálculo com o paliativo e carga dos dados
-- [ ] Versão legada: API, front Razor Pages intermediário e telas em jQuery
+- [x] Versão legada: API do back (busca por `LIKE`, bloqueio que expira, grupo inteiro, salvar o orçamento inteiro)
+- [ ] Versão legada: front Razor Pages intermediário, login simulado e telas em jQuery
 - [ ] API nova: Postgres → Redis → Elasticsearch
 - [ ] Front (React + Vite + TanStack Query)
 - [ ] Ambiente “VPS” e benchmark
