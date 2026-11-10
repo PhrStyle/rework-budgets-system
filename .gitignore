@@ -40,3 +40,6 @@ playwright-report/
 test-results/
 # Binários da legada publicados para o ambiente "VPS"
 bench/vps/out/
+
+# Vídeos intermediários da gravação dos GIFs (docs/gif)
+docs/gif/out/

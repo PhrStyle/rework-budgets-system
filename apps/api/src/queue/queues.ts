@@ -18,10 +18,14 @@ export interface BudgetChangedJob {
 /**
  * Indexar pode repetir sem efeito colateral (o documento é sobrescrito pelo id do orçamento),
  * então a fila pode entregar "pelo menos uma vez" sem problema. Com o destino fora do ar, tenta
- * de novo com espera crescente: 1 s, 2 s, 4 s… (8 tentativas ≈ 4 min no total).
+ * de novo com espera crescente: 1 s, 2 s, 4 s… 12 tentativas cobrem ~68 min de queda.
+ *
+ * Eram 8 (~2 min): numa queda de ~1,5 min do Elasticsearch, somada ao tempo de ele reiniciar,
+ * 278 tarefas esgotaram as tentativas, e o alerta IndexacaoFalhando disparou (medido no ambiente
+ * "VPS"). O orçamento de retentativas precisa ser maior que uma queda realista do destino.
  */
 export const DEFAULT_JOB_OPTIONS: DefaultJobOptions = {
-  attempts: 8,
+  attempts: 12,
   backoff: { type: 'exponential', delay: 1_000 },
   // Concluídas ficam 1 h (o jobId fixo evita reprocessar se o relay publicar de novo);
   // falhas ficam 7 dias, com o erro, para alguém olhar e reprocessar.
