@@ -1,0 +1,19 @@
+{
+  "name": "@budgets/budget-calc",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Regras de cálculo do orçamento: itens, grupos, orçamentos vinculados, prazo e margem.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@budgets/money": "workspace:*"
+  },
+  "devDependencies": {
+    "fast-check": "^4.10.2"
+  }
+}

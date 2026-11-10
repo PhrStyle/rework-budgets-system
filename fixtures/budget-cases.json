@@ -1,0 +1,266 @@
+{
+  "_sobre": [
+    "Casos de cálculo compartilhados pelas duas versões (Vitest na nova, xUnit na legada).",
+    "Os resultados esperados foram calculados À MÃO; a conta está em 'conta'. Nunca gere 'expected' com o próprio código.",
+    "Unidades: price em centavos; quantity em centésimos da unidade (3 un = 300; 2,5 m = 250); discount, prazo e margem em pontos-base (7,5% = 750).",
+    "Arredondamento comercial (meio para cima) no item e a cada passo (prazo, depois margem)."
+  ],
+  "cases": [
+    {
+      "name": "item simples com prazo e margem",
+      "conta": [
+        "item: 123456 × 300 × (10000 − 750) / 1.000.000 = 342590,4 → 342590",
+        "prazo +5%: 342590 × 10500 / 10000 = 359719,5 → 359720 (valor do prazo: 17130)",
+        "margem +10%: 359720 × 11000 / 10000 = 395692 (valor da margem: 35972)"
+      ],
+      "input": {
+        "id": 1,
+        "prazo": 500,
+        "margem": 1000,
+        "groups": [
+          {
+            "id": "g1",
+            "items": [{ "id": "i1", "price": 123456, "quantity": 300, "discount": 750 }]
+          }
+        ],
+        "children": []
+      },
+      "expected": {
+        "groups": [{ "id": "g1", "subtotal": 342590, "items": [{ "id": "i1", "total": 342590 }] }],
+        "children": [],
+        "groupsTotal": 342590,
+        "childrenTotal": 0,
+        "subtotal": 342590,
+        "prazoAmount": 17130,
+        "afterPrazo": 359720,
+        "margemAmount": 35972,
+        "total": 395692
+      }
+    },
+    {
+      "name": "quantidade fracionária (m e kg)",
+      "conta": [
+        "2,5 m a R$ 19,99: 1999 × 250 × 10000 / 1.000.000 = 4997,5 → 4998",
+        "1,25 kg a R$ 8,40 com 10%: 840 × 125 × 9000 / 1.000.000 = 945",
+        "grupo: 4998 + 945 = 5943; sem prazo nem margem"
+      ],
+      "input": {
+        "id": 2,
+        "prazo": 0,
+        "margem": 0,
+        "groups": [
+          {
+            "id": "g1",
+            "items": [
+              { "id": "cabo", "price": 1999, "quantity": 250, "discount": 0 },
+              { "id": "massa", "price": 840, "quantity": 125, "discount": 1000 }
+            ]
+          }
+        ],
+        "children": []
+      },
+      "expected": {
+        "groups": [
+          {
+            "id": "g1",
+            "subtotal": 5943,
+            "items": [
+              { "id": "cabo", "total": 4998 },
+              { "id": "massa", "total": 945 }
+            ]
+          }
+        ],
+        "children": [],
+        "groupsTotal": 5943,
+        "childrenTotal": 0,
+        "subtotal": 5943,
+        "prazoAmount": 0,
+        "afterPrazo": 5943,
+        "margemAmount": 0,
+        "total": 5943
+      }
+    },
+    {
+      "name": "ajuste de prazo negativo",
+      "conta": [
+        "item: 10000 × 100 × 10000 / 1.000.000 = 10000",
+        "prazo −2,5%: 10000 × 9750 / 10000 = 9750 (valor do prazo: −250)",
+        "margem +15%: 9750 × 11500 / 10000 = 11212,5 → 11213 (valor da margem: 1463)"
+      ],
+      "input": {
+        "id": 3,
+        "prazo": -250,
+        "margem": 1500,
+        "groups": [
+          {
+            "id": "g1",
+            "items": [{ "id": "i1", "price": 10000, "quantity": 100, "discount": 0 }]
+          }
+        ],
+        "children": []
+      },
+      "expected": {
+        "groups": [{ "id": "g1", "subtotal": 10000, "items": [{ "id": "i1", "total": 10000 }] }],
+        "children": [],
+        "groupsTotal": 10000,
+        "childrenTotal": 0,
+        "subtotal": 10000,
+        "prazoAmount": -250,
+        "afterPrazo": 9750,
+        "margemAmount": 1463,
+        "total": 11213
+      }
+    },
+    {
+      "name": "meio centavo em cada passo",
+      "conta": [
+        "item: 1 × 100 × 5000 / 1.000.000 = 0,5 → 1",
+        "prazo +50%: 1 × 15000 / 10000 = 1,5 → 2 (valor do prazo: 1)",
+        "margem +50%: 2 × 15000 / 10000 = 3 (valor da margem: 1)"
+      ],
+      "input": {
+        "id": 4,
+        "prazo": 5000,
+        "margem": 5000,
+        "groups": [
+          { "id": "g1", "items": [{ "id": "i1", "price": 1, "quantity": 100, "discount": 5000 }] }
+        ],
+        "children": []
+      },
+      "expected": {
+        "groups": [{ "id": "g1", "subtotal": 1, "items": [{ "id": "i1", "total": 1 }] }],
+        "children": [],
+        "groupsTotal": 1,
+        "childrenTotal": 0,
+        "subtotal": 1,
+        "prazoAmount": 1,
+        "afterPrazo": 2,
+        "margemAmount": 1,
+        "total": 3
+      }
+    },
+    {
+      "name": "orçamento com dois filhos",
+      "conta": [
+        "filho 2001: 2 un a R$ 50,00 = 10000; prazo +10%: 11000; sem margem → 11000",
+        "filho 2002: 1 un a R$ 33,33 = 3333; sem prazo; margem +15%: 3333 × 11500 / 10000 = 3832,95 → 3833",
+        "pai: 1 un a R$ 200,00 = 20000; subtotal 20000 + 11000 + 3833 = 34833",
+        "prazo +5%: 34833 × 10500 / 10000 = 36574,65 → 36575 (valor do prazo: 1742)",
+        "margem +10%: 36575 × 11000 / 10000 = 40232,5 → 40233 (valor da margem: 3658)"
+      ],
+      "input": {
+        "id": 2000,
+        "prazo": 500,
+        "margem": 1000,
+        "groups": [
+          { "id": "g1", "items": [{ "id": "i1", "price": 20000, "quantity": 100, "discount": 0 }] }
+        ],
+        "children": [
+          {
+            "id": 2001,
+            "prazo": 1000,
+            "margem": 0,
+            "groups": [
+              {
+                "id": "a1",
+                "items": [{ "id": "a1i1", "price": 5000, "quantity": 200, "discount": 0 }]
+              }
+            ],
+            "children": []
+          },
+          {
+            "id": 2002,
+            "prazo": 0,
+            "margem": 1500,
+            "groups": [
+              {
+                "id": "b1",
+                "items": [{ "id": "b1i1", "price": 3333, "quantity": 100, "discount": 0 }]
+              }
+            ],
+            "children": []
+          }
+        ]
+      },
+      "expected": {
+        "groups": [{ "id": "g1", "subtotal": 20000, "items": [{ "id": "i1", "total": 20000 }] }],
+        "children": [
+          { "id": 2001, "total": 11000 },
+          { "id": 2002, "total": 3833 }
+        ],
+        "groupsTotal": 20000,
+        "childrenTotal": 14833,
+        "subtotal": 34833,
+        "prazoAmount": 1742,
+        "afterPrazo": 36575,
+        "margemAmount": 3658,
+        "total": 40233
+      }
+    },
+    {
+      "name": "desconto de 100% e grupo vazio",
+      "conta": [
+        "item com 100% de desconto: 50000 × 100 × 0 / 1.000.000 = 0",
+        "4 un a R$ 12,50: 1250 × 400 × 10000 / 1.000.000 = 5000",
+        "grupo vazio: 0; total 5000"
+      ],
+      "input": {
+        "id": 6,
+        "prazo": 0,
+        "margem": 0,
+        "groups": [
+          {
+            "id": "g1",
+            "items": [
+              { "id": "brinde", "price": 50000, "quantity": 100, "discount": 10000 },
+              { "id": "i2", "price": 1250, "quantity": 400, "discount": 0 }
+            ]
+          },
+          { "id": "g2", "items": [] }
+        ],
+        "children": []
+      },
+      "expected": {
+        "groups": [
+          {
+            "id": "g1",
+            "subtotal": 5000,
+            "items": [
+              { "id": "brinde", "total": 0 },
+              { "id": "i2", "total": 5000 }
+            ]
+          },
+          { "id": "g2", "subtotal": 0, "items": [] }
+        ],
+        "children": [],
+        "groupsTotal": 5000,
+        "childrenTotal": 0,
+        "subtotal": 5000,
+        "prazoAmount": 0,
+        "afterPrazo": 5000,
+        "margemAmount": 0,
+        "total": 5000
+      }
+    },
+    {
+      "name": "neto é recusado (profundidade máxima 1)",
+      "conta": ["o filho 7001 contém o 7002: dois níveis"],
+      "input": {
+        "id": 7000,
+        "prazo": 0,
+        "margem": 0,
+        "groups": [],
+        "children": [
+          {
+            "id": 7001,
+            "prazo": 0,
+            "margem": 0,
+            "groups": [],
+            "children": [{ "id": 7002, "prazo": 0, "margem": 0, "groups": [], "children": [] }]
+          }
+        ]
+      },
+      "error": "CHILD_HAS_CHILDREN"
+    }
+  ]
+}
