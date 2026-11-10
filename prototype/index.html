@@ -99,6 +99,9 @@ mark{background:color-mix(in srgb,#facc15 45%,transparent);color:inherit;border-
 .more{padding:12px;text-align:center}
 .skel{height:12px;border-radius:6px;background:linear-gradient(90deg,var(--sunken),var(--border),var(--sunken));background-size:200% 100%;animation:sk 1.1s infinite;margin:14px 20px}
 @keyframes sk{to{background-position:-200% 0}}
+.draftbar{display:flex;align-items:center;gap:10px;padding:10px 16px;margin-bottom:16px;flex-wrap:wrap;font-size:14px}
+.draftbar .dot{width:9px;height:9px;border-radius:50%;background:var(--good);flex:none}.draftbar .dot.warn{background:var(--warn)}
+.draftbar b{font-weight:600;font-variant-numeric:tabular-nums}
 .links{margin-top:20px}
 .links .lh{padding:14px 20px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border);flex-wrap:wrap}
 .links .lr{display:flex;align-items:center;gap:16px;padding:10px 20px;border-bottom:1px solid var(--border)}
@@ -259,6 +262,20 @@ const toast=(msg,kind='')=>{const t=document.getElementById('toast');t.textConte
 const res=(b,x={})=>({calc:calcNew(b),kids:kidsNew(b),...x});
 const rowHtmlLen=730;/* ~bytes de HTML por linha que o Razor devolveria (inputs + atributos) */
 
+/* ============ RASCUNHO DE EDIÇÃO (versão nova) ============
+   Abrir para editar cria um rascunho do usuário no redis-data (noeviction + AOF). Edições vão só para ele.
+   "Salvar alterações" grava o changeset no Postgres numa transação; "Descartar" apaga. TTL de 30 min desde
+   a última edição, o mesmo do bloqueio: o rascunho segura o bloqueio. Várias abas usam o mesmo rascunho. */
+const DRAFT_TTL_MS=30*60*1000,DRAFTS=new Map();
+const cloneBudget=b=>({...b,groups:b.groups.map(g=>({...g,items:g.items?g.items.map(i=>({...i})):null})),children:[...b.children]});
+function draftOf(bid){const d=DRAFTS.get(bid);if(d&&Date.now()-d.touched>DRAFT_TTL_MS){DRAFTS.delete(bid);log(`rascunho de #${bid} expirou (30 min sem edição): rascunho e bloqueio removidos`,'miss');return null}return d||null}
+const work=bid=>draftOf(bid)?.b??budget(bid);
+const workG=(bid,gid)=>work(bid).groups.find(x=>x.id===gid);
+function ensureDraft(bid){let d=draftOf(bid);if(!d){d={b:cloneBudget(budget(bid)),changes:new Set(),since:Date.now(),touched:Date.now()};DRAFTS.set(bid,d);
+  log(`${tag('hit','redis-data')} SET draft:${bid}:user7 … EX 1800 · SET lock:orcamento:${bid} user7 NX EX 1800 → rascunho criado; o bloqueio fica preso a ele`,'hit')}return d}
+function track(bid,key){const d=ensureDraft(bid);d.changes.add(key);d.touched=Date.now()}
+const mmss=ms=>{const s=Math.max(0,Math.ceil(ms/1000));return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')};
+
 const api={
   async search({q,status,seller,sort,dir,page},legacy){
     const lat=await net({down:3000,srv:legacy?90:12});
@@ -267,41 +284,55 @@ const api={
     r=r.map(b=>({id:b.id,description:b.description,seller:b.seller,status:b.status,total:(legacy?calcDec(b):calcNew(b)).total,parentId:b.parentId,kids:b.children.length,lockedBy:legacy&&LOCKS.get(b.id)?LOCKS.get(b.id).user:null})).sort((a,b)=>(a[sort]>b[sort]?1:-1)*(dir==='asc'?1:-1));
     log(legacy?`GET /Orcamento?q=${esc(q||'')} ${tag('miss',"SQL LIKE '%q%'")} → ${r.length} linhas · ${lat}ms`:`GET /budgets?q=${esc(q||'')} ${tag('es','Elasticsearch')} → ${r.length} hits · ${lat}ms`,legacy?'miss':'es');
     return{items:r.slice((page-1)*10,page*10),total:r.length,ms:lat}},
-  async getBudget(id){const hit=redis.has(`budget:${id}:summary`),b=budget(id);redis.add(`budget:${id}:summary`);
+  async getBudget(id){const d=draftOf(id),hit=d||redis.has(`budget:${id}:summary`),b=work(id);redis.add(`budget:${id}:summary`);
     const lat=await net({down:2500,srv:hit?2:35});
-    log(`GET /budgets/${id} → header + ${b.groups.length} grupos + ${b.children.length} vinculados, sem itens · ${hit?tag('hit','Redis HIT'):tag('miss','Postgres MISS')} · ${lat}ms`,hit?'hit':'miss');
-    return res(b,{...b,lat,groups:b.groups.map(g=>({id:g.id,name:g.name,category:g.category,count:g.count,subC:g.subC}))})},
-  async getGroup(bid,gid,page){const g=gOf(bid,gid),hit=redis.has(ck(bid,gid));if(!g.items)g.items=genItems(g.count,g.salt);redis.add(ck(bid,gid));
+    log(`GET /budgets/${id} → header + ${b.groups.length} grupos + ${b.children.length} vinculados, sem itens · ${d?tag('hit','rascunho no redis-data ('+d.changes.size+' alterações)'):hit?tag('hit','Redis HIT'):tag('miss','Postgres MISS')} · ${lat}ms`,hit?'hit':'miss');
+    return res(b,{...b,lat,draft:d?{changes:d.changes.size,since:d.since}:null,groups:b.groups.map(g=>({id:g.id,name:g.name,category:g.category,count:g.count,subC:g.subC}))})},
+  async getGroup(bid,gid,page){const g=workG(bid,gid),hit=redis.has(ck(bid,gid));if(!g.items)g.items=genItems(g.count,g.salt);redis.add(ck(bid,gid));
     const out=g.items.slice((page-1)*25,page*25).map(i=>({...i}));const lat=await net({down:sizeOf(out),srv:hit?2:25+out.length*.05});
     log(`GET /groups/${gid}?page=${page} → ${out.length}/${g.count} itens · ${hit?tag('hit','Redis HIT'):tag('miss','Postgres MISS')} · ${lat}ms`,hit?'hit':'miss');
     return{items:out,total:g.count,ver:g.ver,lat,payload:sizeOf(out)}},
-  async patchHeader(bid,patch){const b=budget(bid);Object.assign(b,patch);const lat=await net({up:150,down:400,srv:4});
-    log(`PATCH /budgets/${bid} ${esc(JSON.stringify(patch))} → recalcula com ${b.groups.length} subtotais + ${b.children.length} filhos (0 itens lidos) · ${lat}ms`);return res(b,{lat,payload:sizeOf(patch)+150})},
-  async patchGroup(bid,gid,patch){Object.assign(gOf(bid,gid),patch);redis.delete(`budget:${bid}:summary`);const lat=await net({up:100,srv:3});log(`PATCH /groups/${gid} ${esc(JSON.stringify(patch))} → invalida só o summary · ${lat}ms`)},
-  _stale(g,ver){if(ver===g.ver)return false;log(`${tag('miss','409 Conflict')} grupo ${g.id}: cliente na v${ver}, servidor na v${g.ver} → write rejeitado`,'miss');return true},
-  async patchItem(bid,gid,iid,patch,ver){const b=budget(bid),g=gOf(bid,gid);const lat=await net({up:sizeOf(patch)+150,down:500,srv:4});if(this._stale(g,ver))return{conflict:true};
-    const it=g.items.find(i=>i.id===iid),bn=itemNewC(it),bd=itemDecC(it);Object.assign(it,patch);g.subC+=itemNewC(it)-bn;g.subD+=itemDecC(it)-bd;g.ver++;
-    log(`PATCH /items/${iid} ${esc(JSON.stringify(patch))} → Δ ${fmtC(itemNewC(it)-bn)} no subtotal (inteiro) sem varrer ${g.count} itens · If-Match v${ver} · ${lat}ms`);
+  /* --- escritas: vão para o RASCUNHO no redis-data, não para o Postgres --- */
+  async patchHeader(bid,patch){const d=ensureDraft(bid),b=d.b;Object.assign(b,patch);Object.keys(patch).forEach(k=>track(bid,'header:'+k));const lat=await net({up:150,down:400,srv:3});
+    log(`PATCH /budgets/${bid}/draft ${esc(JSON.stringify(patch))} → rascunho; recalcula com ${b.groups.length} subtotais + ${b.children.length} filhos (0 itens lidos) · ${lat}ms`);return res(b,{lat,payload:sizeOf(patch)+150})},
+  async patchGroup(bid,gid,patch){Object.assign(ensureDraft(bid).b.groups.find(x=>x.id===gid),patch);track(bid,'group:'+gid);const lat=await net({up:100,srv:2});log(`PATCH /budgets/${bid}/draft/groups/${gid} ${esc(JSON.stringify(patch))} → rascunho · ${lat}ms`)},
+  _stale(g,ver){if(ver===g.ver)return false;log(`${tag('miss','409 Conflict')} grupo ${g.id}: aba na v${ver}, rascunho na v${g.ver} → recarregar o grupo`,'miss');return true},
+  _dg(bid,gid){const g=ensureDraft(bid).b.groups.find(x=>x.id===gid);if(!g.items)g.items=genItems(g.count,g.salt);return g},
+  async patchItem(bid,gid,iid,patch,ver){const lat=await net({up:sizeOf(patch)+150,down:500,srv:3});const g=this._dg(bid,gid),b=work(bid);if(this._stale(g,ver))return{conflict:true};
+    const it=g.items.find(i=>i.id===iid),bn=itemNewC(it),bd=itemDecC(it);Object.assign(it,patch);g.subC+=itemNewC(it)-bn;g.subD+=itemDecC(it)-bd;g.ver++;track(bid,'item:'+iid);
+    log(`PATCH /budgets/${bid}/draft/items/${iid} ${esc(JSON.stringify(patch))} → rascunho; Δ ${fmtC(itemNewC(it)-bn)} no subtotal sem varrer ${g.count} itens · nada gravado no Postgres · ${lat}ms`);
     return res(b,{ver:g.ver,subC:g.subC,lat,payload:sizeOf(patch)+150,itemC:itemNewC(it)})},
-  async addItem(bid,gid,p,ver,refId,where){const b=budget(bid),g=gOf(bid,gid);const lat=await net({up:200,down:600,srv:5});if(this._stale(g,ver))return{conflict:true};
+  async addItem(bid,gid,p,ver,refId,where){const lat=await net({up:200,down:600,srv:3});const g=this._dg(bid,gid),b=work(bid);if(this._stale(g,ver))return{conflict:true};
     const it={id:`n${++uid}`,sku:p.sku,name:p.name,priceC:p.priceC,qty:1,discBp:0};let idx=refId?g.items.findIndex(x=>x.id===refId)+(where==='before'?0:1):g.items.length;if(idx<0)idx=g.items.length;
-    g.items.splice(idx,0,it);g.count++;g.subC+=itemNewC(it);g.subD+=itemDecC(it);g.ver++;
-    log(`POST /groups/${gid}/items {${p.sku}, ${where||'end'} ${refId||''}} → posição por índice fracionário, Δ +${fmtC(itemNewC(it))} · ${lat}ms`);return res(b,{item:{...it},subC:g.subC,count:g.count,ver:g.ver,lat,payload:200})},
-  async delItem(bid,gid,iid,ver){const b=budget(bid),g=gOf(bid,gid);const lat=await net({up:100,down:500,srv:4});if(this._stale(g,ver))return{conflict:true};
-    const i=g.items.findIndex(x=>x.id===iid),it=g.items[i];g.items.splice(i,1);g.count--;g.subC-=itemNewC(it);g.subD-=itemDecC(it);g.ver++;
-    log(`DELETE /items/${iid} → Δ −${fmtC(itemNewC(it))} · ${lat}ms`);return res(b,{subC:g.subC,count:g.count,ver:g.ver,lat,payload:100})},
-  async reorder(bid,gid,movedId,afterId,ver){const g=gOf(bid,gid);const lat=await net({up:120,down:100,srv:3});if(this._stale(g,ver))return{conflict:true};g.ver++;
-    log(`PUT /items/${movedId}/position {after:${afterId||'∅'}} → só a posição do item muda (índice fracionário), totais intactos · ${lat}ms`);return{ver:g.ver,lat,payload:120}},
+    g.items.splice(idx,0,it);g.count++;g.subC+=itemNewC(it);g.subD+=itemDecC(it);g.ver++;track(bid,'item:'+it.id);
+    log(`POST /budgets/${bid}/draft/items {${p.sku}, ${where||'end'} ${refId||''}} → rascunho; Δ +${fmtC(itemNewC(it))} · ${lat}ms`);return res(b,{item:{...it},subC:g.subC,count:g.count,ver:g.ver,lat,payload:200})},
+  async delItem(bid,gid,iid,ver){const lat=await net({up:100,down:500,srv:3});const g=this._dg(bid,gid),b=work(bid);if(this._stale(g,ver))return{conflict:true};
+    const i=g.items.findIndex(x=>x.id===iid),it=g.items[i];g.items.splice(i,1);g.count--;g.subC-=itemNewC(it);g.subD-=itemDecC(it);g.ver++;track(bid,'item:'+iid);
+    log(`DELETE /budgets/${bid}/draft/items/${iid} → rascunho; Δ −${fmtC(itemNewC(it))} · ${lat}ms`);return res(b,{subC:g.subC,count:g.count,ver:g.ver,lat,payload:100})},
+  async reorder(bid,gid,movedId,afterId,ver){const lat=await net({up:120,down:100,srv:2});const g=this._dg(bid,gid);if(this._stale(g,ver))return{conflict:true};g.ver++;track(bid,'pos:'+movedId);
+    log(`PUT /budgets/${bid}/draft/items/${movedId}/position {after:${afterId||'∅'}} → rascunho; só a posição muda · ${lat}ms`);return{ver:g.ver,lat,payload:120}},
+  /* --- salvar e descartar --- */
+  async commitDraft(bid){const d=draftOf(bid);if(!d)return{changes:0,lat:0,payload:0,...res(budget(bid))};const n=d.changes.size,pl=200+n*160;const lat=await net({up:pl,down:500,srv:8+3*n});
+    const db=budget(bid),b=d.b;['description','client','seller','status','prazoBp','margemBp'].forEach(k=>{db[k]=b[k]});db.groups=b.groups.map(g=>({...g}));db.lrev=(db.lrev||0)+1;
+    DRAFTS.delete(bid);redis.delete(`budget:${bid}:summary`);
+    log(`POST /budgets/${bid}/draft/commit → ${n} alterações gravadas no Postgres em 1 transação (só o changeset) · DEL draft e lock · outbox: reindexar ${bid} · ${lat}ms`);
+    return{...res(db),changes:n,lat,payload:pl}},
+  discardDraft(bid){const d=draftOf(bid);DRAFTS.delete(bid);log(`DEL draft:${bid}:user7 lock:orcamento:${bid} → ${d?d.changes.size:0} alterações descartadas; o Postgres não foi tocado`,'hit')},
+  /* outra aba do MESMO usuário edita o MESMO rascunho */
+  otherTab(bid,gid){const g=this._dg(bid,gid),it=g.items[0],bn=itemNewC(it),bd=itemDecC(it),from=it.qty;it.qty=from+1;g.subC+=itemNewC(it)-bn;g.subD+=itemDecC(it)-bd;g.ver++;track(bid,'item:'+it.id);
+    log(`(outra aba sua) PATCH /budgets/${bid}/draft/items/${it.id} {"qty":${it.qty}} → mesmo rascunho; esta aba é avisada (BroadcastChannel)`);return{name:it.name,from,to:it.qty}},
   async catalog(q,legacy){const lat=await net({down:900,srv:legacy?60:10});const w=q.toLowerCase().split(/\s+/).filter(Boolean);
     const r=CATALOG.filter(p=>w.every(x=>p.name.toLowerCase().includes(x)||p.sku.toLowerCase().includes(x))).slice(0,8);
     log(`GET /catalog/suggest?q=${esc(q)} ${legacy?tag('miss','SQL LIKE'):tag('es','Elasticsearch')} → ${r.length} · ${lat}ms`,legacy?'miss':'es');return r},
+  /* vínculos: gravados na hora (estrutura), refletidos no rascunho se houver */
   async link(pid,cid){const lat=await net({up:150,down:500,srv:6});const err=linkError(pid,cid);if(err){log(`${tag('miss','422')} POST /budgets/${pid}/children → ${esc(err)}`,'miss');return{error:err}}
-    budget(pid).children.push(cid);budget(cid).parentId=pid;log(`POST /budgets/${pid}/children {${cid}} → pai recalcula somando o total do filho · ${lat}ms`);return res(budget(pid),{lat,payload:150})},
-  async unlink(pid,cid){const lat=await net({up:100,down:500,srv:5});const p=budget(pid);p.children=p.children.filter(x=>x!==cid);budget(cid).parentId=null;log(`DELETE /budgets/${pid}/children/${cid} · ${lat}ms`);return res(p,{lat,payload:100})},
-  otherUser(bid,gid){const g=gOf(bid,gid);if(!g.items)g.items=genItems(g.count,g.salt);const it=g.items[0],before=it.priceC;it.priceC=roundDiv(before*120,100);recompute(g);g.ver++;
-    log(`(outro usuário) ${esc(it.name)}: ${fmtC(before)} → ${fmtC(it.priceC)} · grupo ${g.id} agora na v${g.ver}`);return{before,after:it.priceC,name:it.name,ver:g.ver}},
-  otherUserChild(cid){const c=budget(cid),r=this.otherUser(cid,c.groups[0].id);log(`(outro usuário) editou o filho #${cid}; o total do pai muda sem o pai ser tocado`);return r}
+    budget(pid).children.push(cid);budget(cid).parentId=pid;const d=draftOf(pid);if(d)d.b.children.push(cid);log(`POST /budgets/${pid}/children {${cid}} → pai recalcula somando o total do filho · ${lat}ms`);return res(work(pid),{lat,payload:150})},
+  async unlink(pid,cid){const lat=await net({up:100,down:500,srv:5});const p=budget(pid);p.children=p.children.filter(x=>x!==cid);budget(cid).parentId=null;const d=draftOf(pid);if(d)d.b.children=d.b.children.filter(x=>x!==cid);log(`DELETE /budgets/${pid}/children/${cid} · ${lat}ms`);return res(work(pid),{lat,payload:100})},
+  /* outro usuário editando e SALVANDO o orçamento filho (não é rascunho seu) */
+  otherUserChild(cid){const c=budget(cid),g=c.groups[0];if(!g.items)g.items=genItems(g.count,g.salt);const it=g.items[0],before=it.priceC;it.priceC=roundDiv(before*120,100);recompute(g);g.ver++;
+    log(`(outro usuário) salvou o filho #${cid}: ${esc(it.name)} ${fmtC(before)} → ${fmtC(it.priceC)}; o total do pai muda sem o pai ser tocado`);return{before,after:it.priceC,name:it.name,ver:g.ver}}
 };
+
 /* servidor legado (como era):
    - abrir um orçamento marca "aberto" no banco e bloqueia OUTROS usuários (o mesmo usuário em outra aba passa);
    - abrir um grupo devolve o grupo INTEIRO (HTML do Razor);
@@ -309,7 +340,9 @@ const api={
 const LOCKS=new Map([[1086,{user:'Marina Costa',since:'08:47'}],[1082,{user:'Bruno Alves',since:'10:02'}]]);
 const ME='Você';
 const avgItemJson=sizeOf(toLegacy(genItems(1)[0]));
-let legacyOpenId=null;
+let legacyOpenId=null,barTimer=null;
+const hhmm=ms=>new Date(ms).toTimeString().slice(0,5);
+const plural=(n,s,p)=>`${n} ${n===1?s:p}`;
 const legacySrv={
   async lock(id){const lat=await net({up:100,down:200,srv:8});const l=LOCKS.get(id);
     if(l&&l.user!==ME){log(`GET /Orcamento/Editar/${id} ${tag('miss','bloqueado')} → aberto por ${esc(l.user)} desde ${l.since} · ${lat}ms`,'miss');return{locked:l,lat}}
@@ -343,7 +376,7 @@ const app=document.getElementById('app');
 const isLegacy=()=>document.body.dataset.view==='legacy';
 function nav(v,id){const h=v==='nova'?'#/':v==='legacy'?'#/legacy':v==='compare'?'#/compare':(isLegacy()?`#/legacy/b/${id}`:`#/b/${id}`);if(location.hash===h)route();else location.hash=h}
 window.addEventListener('hashchange',route);
-function route(){const h=location.hash,L=h.startsWith('#/legacy'),C=h.startsWith('#/compare');let m;
+function route(){const h=location.hash,L=h.startsWith('#/legacy'),C=h.startsWith('#/compare');let m;clearInterval(barTimer);
   if(legacyOpenId&&h!==`#/legacy/b/${legacyOpenId}`){legacySrv.release(legacyOpenId);legacyOpenId=null}
   document.body.dataset.view=C?'compare':L?'legacy':'nova';
   document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.v===document.body.dataset.view));
@@ -377,17 +410,18 @@ function renderList(mode='new'){
    'new'    → cliente só exibe; servidor calcula (inteiros, arredondamento comercial); PATCH com delta; itens paginados; versão otimista.
    'legacy' → bloqueio "aberto" no banco; todos os itens no DOM; jQuery-style lê/recalcula TUDO em float; localStorage; POST do orçamento inteiro.
    "Cliente" é medido (performance.now). "Rede + servidor" é simulado pelo ambiente escolhido no topo. */
-async function renderDetail(id,mode='new'){
-  const L=mode==='legacy';
+async function renderDetail(id,mode='new',opts={}){
+  const L=mode==='legacy';clearInterval(barTimer);
   app.innerHTML='<div class="skel"></div><div class="skel"></div><div class="skel"></div>';
   const B=await(L?legacySrv.getBudget(id):api.getBudget(id));
   if(B.locked){app.innerHTML=`<button class="back" onclick="nav('legacy')">← Orçamentos</button>
     <div class="card" style="padding:28px 32px;max-width:640px"><h2>Orçamento #${id} bloqueado</h2><p class="muted" style="margin:8px 0 16px">Está aberto por <b style="color:var(--text)">${esc(B.locked.user)}</b> desde ${B.locked.since}. No sistema antigo, abrir um orçamento o marcava como “aberto” no banco, e ninguém mais conseguia abri-lo até ser liberado.</p><button onclick="nav('legacy')">Voltar</button></div>`;return}
   if(L)legacyOpenId=id;
   app.innerHTML=`<button class="back" onclick="nav('${L?'legacy':'nova'}')">← Orçamentos</button>
-  <div class="pagehead"><div><h2>Orçamento #${B.id}${L?' <span class="pill" style="--c:var(--warn)">aberto por você · bloqueado para outros</span>':''}</h2><p class="muted">${L?'Arquitetura antiga (simulada): ao abrir um grupo vêm todos os itens, cada alteração recalcula tudo no navegador e salvar envia o orçamento inteiro.':'Só o cabeçalho e o resumo dos grupos foram carregados. Os itens vêm ao abrir cada grupo.'}</p></div>
-  <div class="toolbar"><div class="tabs" id="modesw"><button data-m="new" class="${L?'':'on'}">Nova</button><button data-m="legacy" class="${L?'on':''}">Legada</button></div>${L?'<button id="other" title="Você abre o mesmo orçamento em outra aba e salva uma alteração lá">Simular outra aba</button><button id="other2" title="Outro usuário tenta abrir este orçamento">Simular outro usuário abrindo</button>':'<button id="other" title="Outra aba ou outro usuário altera um preço no servidor">Simular outra aba ou usuário</button>'}</div></div>
+  <div class="pagehead"><div><h2>Orçamento #${B.id}${L?' <span class="pill" style="--c:var(--warn)">aberto por você · bloqueado para outros</span>':''}</h2><p class="muted">${L?'Arquitetura antiga (simulada): ao abrir um grupo vêm todos os itens; cada alteração recalcula tudo no navegador e fica só na página até salvar (botão ou automático a cada 5 min), e salvar envia o orçamento inteiro.':'Só o cabeçalho e o resumo dos grupos foram carregados; os itens vêm ao abrir cada grupo. As edições vão para um rascunho seu no servidor e só viram oficiais em “Salvar alterações”.'}</p></div>
+  <div class="toolbar"><div class="tabs" id="modesw"><button data-m="new" class="${L?'':'on'}">Nova</button><button data-m="legacy" class="${L?'on':''}">Legada</button></div><button id="other" title="Você edita este mesmo orçamento em outra aba">Simular outra aba</button><button id="other2" title="Outro usuário tenta abrir este orçamento">Simular outro usuário abrindo</button><button id="crash" title="O navegador fecha de repente">Simular queda de energia</button></div></div>
   <div class="diag" id="mx">${['Última ação','Cliente (medido)','Rede + servidor (simulado)','Tela atualiza em','Itens tocados','Payload','Nós no DOM'].map(x=>`<div><small>${x}</small><b>—</b></div>`).join('')}</div>
+  <div class="card draftbar" id="draftbar"></div>
   <div class="card"><div class="hdr">
     <label class="s5">Descrição<input id="h-desc" value="${esc(B.description)}"></label>
     <label class="s3">Cliente<input id="h-cli" value="${esc(B.client)}"></label>
@@ -404,12 +438,12 @@ async function renderDetail(id,mode='new'){
   <div class="card links" id="links"></div>`;
   document.querySelectorAll('#modesw button').forEach(b=>b.onclick=()=>{location.hash=b.dataset.m==='legacy'?`#/legacy/b/${id}`:`#/b/${id}`});
   const S={groups:B.groups.map(g=>({...g,loaded:false,items:[],page:1,ver:0})),prazoBp:B.prazoBp,margemBp:B.margemBp,prazo:B.prazoBp/100,margem:B.margemBp/100,parentId:B.parentId,
-    calc:B.calc,kids:B.kids,srvTotalC:B.serverTotalC,rev:B.rev};
-  const setMx=(act,{client=0,lat=0,screen,touched=0,payload=0})=>{const c=document.querySelectorAll('#mx b');c[0].textContent=act;c[1].textContent=client.toFixed(1)+' ms';c[2].textContent=lat?lat+' ms':'—';c[3].textContent=(screen??client+lat).toFixed(0)+' ms';c[4].textContent=touched.toLocaleString('pt-BR');c[5].textContent=kb(payload);c[6].textContent=document.querySelectorAll('#groups *').length.toLocaleString('pt-BR')};
+    calc:B.calc,kids:B.kids,srvTotalC:B.serverTotalC,rev:B.rev,dirty:0,autoAt:Date.now()+5*60*1000};
+  const setMx=(act,{client=0,lat=0,screen,touched=0,payload=0})=>{const c=document.querySelectorAll('#mx b');c[0].textContent=act;c[1].textContent=client.toFixed(1)+' ms';c[2].textContent=lat?lat+' ms':'—';c[3].textContent=(screen??client+lat).toFixed(0)+' ms';c[4].textContent=touched.toLocaleString('pt-BR');c[5].textContent=kb(payload);c[6].textContent=document.querySelectorAll('#groups *').length.toLocaleString('pt-BR');drawBar()};
   const paint=(flash=true)=>{const $=i=>document.getElementById(i);let o,k,pz,mg,t;
     if(L){const own=S.groups.reduce((a,g)=>a+g.subF,0),kids=S.kids.reduce((a,x)=>a+x.totF,0),sub=own+kids,ap=ceilF(sub*(1+S.prazo/100)),total=ceilF(ap*(1+S.margem/100));
       o=brl(own);k=brl(kids);pz=`+${S.prazo}% · ${brl(ap-sub)}`;mg=`+${S.margem}% · ${brl(total-ap)}`;t=brl(total);
-      const d=total-S.srvTotalC/100,el=$('t-diff');el.textContent=(d>=0?'+':'')+brl(d);el.style.color=Math.abs(d)>=.005?'var(--bad)':'var(--good)'}
+      const el=$('t-diff');if(S.dirty){el.textContent='— (alterações não salvas)';el.style.color='var(--muted)'}else{const d=total-S.srvTotalC/100;el.textContent=(d>=0?'+':'')+brl(d);el.style.color=Math.abs(d)>=.005?'var(--bad)':'var(--good)'}}
     else{const c=S.calc;o=fmtC(c.own);k=fmtC(c.kids);pz=`+${pctTxt(S.prazoBp)} · ${fmtC(c.ap-c.sub)}`;mg=`+${pctTxt(S.margemBp)} · ${fmtC(c.total-c.ap)}`;t=fmtC(c.total)}
     $('t-own').textContent=o;$('t-kids').textContent=k;$('t-prazo').textContent=pz;$('t-marg').textContent=mg;const el=$('t-total');el.textContent=t;if(flash){el.classList.remove('flash');void el.offsetWidth;el.classList.add('flash')}};
   const applyCalc=(r,quiet)=>{if(!r.calc)return;const prev=S.calc.kids;S.calc=r.calc;S.kids=r.kids;if(!quiet&&prev!==r.calc.kids)toast('O total de um orçamento vinculado mudou. O servidor recalculou o pai.','warn');drawLinks()};
@@ -419,18 +453,26 @@ async function renderDetail(id,mode='new'){
   const lRecalc=()=>{let n=0;S.groups.forEach(g=>{if(!g.loaded)return;let s=0;rowsOf(g).forEach(r=>{const q=parseFloat(r.querySelector('[data-f=qty]').value)||0,d=parseFloat(r.querySelector('[data-f=disc]').value)||0,u=parseBRL(r.querySelector('.unit').textContent),t=ceilF(u*q*(1-d/100));r.querySelector('.tot').textContent=brl(t);s+=t;n++});g.subF=s});return n};
   const lCollect=g=>[...rowsOf(g)].map(r=>({id:r.dataset.id,sku:r.dataset.sku,name:r.querySelector('.nm').textContent,price:parseBRL(r.querySelector('.unit').textContent),qty:+r.querySelector('[data-f=qty]').value,disc:+r.querySelector('[data-f=disc]').value}));
   const lPersist=()=>{S.groups.forEach(g=>{if(!g.loaded)return;try{localStorage.setItem('legacy:g:'+g.id,JSON.stringify(lCollect(g)))}catch(e){}})};
-  /* todo salvamento envia o orçamento INTEIRO: cabeçalho + todos os grupos + todos os itens */
-  const lCommit=async(act,g,pre)=>{const c0=performance.now();if(pre)pre();const n=lRecalc();lPersist();
-    const loaded={};S.groups.forEach(x=>{if(!x.loaded)return;const d=lCollect(x);x.items=d;x.count=d.length;x.paintHead();loaded[x.id]=d});paint();
+  /* alteração fica só na página e no localStorage: nada vai ao servidor até salvar */
+  const lCommit=(act,g,pre)=>{const c0=performance.now();if(pre)pre();S.dirty++;const n=lRecalc();lPersist();
+    S.groups.forEach(x=>{if(!x.loaded)return;const d=lCollect(x);x.items=d;x.count=d.length;x.paintHead()});paint();
+    const client=performance.now()-c0;
+    log(`(navegador) alteração só na página: recalculou ${n.toLocaleString('pt-BR')} linhas em JS e gravou no localStorage · nada foi ao servidor`,'miss');
+    setMx(act,{client,lat:0,screen:client,touched:n,payload:0})};
+  /* salvar (botão ou automático a cada 5 min) envia o orçamento INTEIRO: cabeçalho + todos os grupos + todos os itens */
+  const lSave=async kind=>{const had=S.dirty;S.autoAt=Date.now()+5*60*1000;
+    if(kind==='auto'&&!had){log('(navegador) salvamento automático: nada mudou desde o último');drawBar();return}
+    const c0=performance.now();const loaded={};S.groups.forEach(x=>{if(x.loaded)loaded[x.id]=lCollect(x)});
     const v=i=>document.getElementById(i).value;
     const header={description:v('h-desc'),client:v('h-cli'),seller:v('h-sel'),status:v('h-st'),prazoBp:Math.round(S.prazo*100),margemBp:Math.round(S.margem*100)};
     const client=performance.now()-c0;
-    const r=await legacySrv.saveAll(id,loaded,header,S.rev);S.rev=r.rev;S.srvTotalC=r.serverTotalC;paint(false);
-    log(`POST /Orcamento/Salvar → orçamento INTEIRO: ${r.groups} grupos, ${r.rows.toLocaleString('pt-BR')} itens, ${kb(r.payload)} · transação com ${r.rows.toLocaleString('pt-BR')} linhas · ${r.lat}ms → servidor recalculou em decimal: ${fmtC(r.serverTotalC)}${r.overwritten?` · ${tag('miss','apagou o que a outra aba salvou')}`:''}`,'miss');
+    const r=await legacySrv.saveAll(id,loaded,header,S.rev);S.rev=r.rev;S.srvTotalC=r.serverTotalC;S.dirty=0;paint(false);
+    log(`POST /Orcamento/Salvar (${kind==='auto'?'automático, a cada 5 min':'botão Salvar'}) → orçamento INTEIRO: ${r.groups} grupos, ${r.rows.toLocaleString('pt-BR')} itens, ${kb(r.payload)} · transação com ${r.rows.toLocaleString('pt-BR')} linhas · ${r.lat}ms${r.overwritten?` · ${tag('miss','apagou o que a outra aba salvou')}`:''}`,'miss');
     if(r.overwritten)toast(`Esta aba estava desatualizada e salvou o orçamento inteiro por cima: “${r.overwritten.name}” voltou de qtd ${r.overwritten.to} para ${r.overwritten.from}. O que você salvou na outra aba foi perdido, sem aviso.`,'bad');
-    setMx(act,{client,lat:r.lat,screen:client,touched:r.rows,payload:r.payload})};
+    else if(kind==='auto')toast(`Salvamento automático: gravou o orçamento inteiro (${r.rows.toLocaleString('pt-BR')} itens), inclusive ${plural(had,'alteração','alterações')} que talvez fosse só simulação.`,'warn');
+    setMx(kind==='auto'?'Salvamento automático':'Salvar',{client,lat:r.lat,touched:r.rows,payload:r.payload})};
 
-  const onConflict=g=>{toast('409 Conflict: outro usuário alterou este grupo. Os dados foram recarregados.','warn');g.loaded=false;g.page=1;openGroup(g)};
+  const onConflict=g=>{toast('409: outra aba alterou este grupo no rascunho. O grupo foi recarregado, sem perder nada.','warn');g.loaded=false;g.page=1;openGroup(g)};
   const openGroup=async g=>{const body=g.el.querySelector('.g-body');body.innerHTML='<div class="skel"></div><div class="skel"></div><div class="skel"></div>';
     if(L){const r=await legacySrv.open(id,g);const c0=performance.now();g.items=r.items;g.count=g.items.length;g.loaded=true;draw(g);const n=lRecalc();lPersist();g.paintHead();paint(false);const client=performance.now()-c0;
       log(`GET /Orcamento/Grupo/${g.id} → ${g.items.length} itens (todos, ${kb(r.payload)} de HTML) · ${r.hit?tag('hit','localStorage HIT, sem validação'):tag('miss','SQL MISS '+r.lat+'ms')} → grava tudo no localStorage`,r.hit?'hit':'miss');
@@ -478,13 +520,33 @@ async function renderDetail(id,mode='new'){
     const r=await api.patchHeader(id,{[key]:v});const c0=performance.now();if(calc)S[key]=v;applyCalc(r,true);paint(calc);setMx('Cabeçalho: '+key,{client:performance.now()-c0,lat:r.lat,touched:calc?S.groups.length+S.kids.length:0,payload:r.payload})};
   [['h-desc','description'],['h-cli','client'],['h-st','status'],['h-sel','seller']].forEach(([a,k])=>hdrSend(a,k));hdrSend('h-prazo','prazoBp',1);hdrSend('h-marg','margemBp',1);
 
+  const reloadGroups=()=>S.groups.forEach(g=>{const wg=workG(id,g.id);g.subC=wg.subC;g.count=wg.count;g.paintHead();if(g.loaded){g.loaded=false;g.page=1;if(g.el.classList.contains('open'))openGroup(g)}});
   if(L){
     document.getElementById('other').onclick=()=>{const g=S.groups.find(x=>x.loaded)||S.groups[0],r=legacySrv.otherTab(id,g.id);
-      toast(`Você abriu este orçamento em outra aba e salvou lá: “${r.name}” qtd ${r.from} → ${r.to}. O bloqueio não impede (é o mesmo usuário) e esta aba continua mostrando ${r.from}. Faça qualquer alteração aqui e veja o que acontece.`,'warn')};
+      toast(`Você abriu este orçamento em outra aba e salvou lá: “${r.name}” qtd ${r.from} → ${r.to}. O bloqueio não impede (é o mesmo usuário) e esta aba continua mostrando ${r.from}. Faça uma alteração aqui e clique em Salvar para ver o que acontece.`,'warn')};
     document.getElementById('other2').onclick=()=>{const user=SELLERS.find(s=>s!==B.seller)||'Marina Costa';legacySrv.tryOpenAsOther(id,user);
       toast(`${user} tentou abrir o orçamento #${id} e foi bloqueado: está aberto por você. O bloqueio só é liberado quando você sai da tela.`,'warn')};
-  }else document.getElementById('other').onclick=()=>{const g=S.groups.find(x=>x.loaded)||S.groups[0],r=api.otherUser(id,g.id);
-    toast(`Outra aba ou outro usuário mudou “${r.name}” de ${fmtC(r.before)} para ${fmtC(r.after)} (grupo na v${r.ver}). Edite algo no grupo “${g.name}” aqui: esta aba recebe 409 e recarrega o grupo, sem apagar nada.`,'warn')};
+    document.getElementById('crash').onclick=()=>{const n=S.dirty;try{S.groups.forEach(g=>localStorage.removeItem('legacy:g:'+g.id))}catch(e){}
+      log('(queda de energia) a página e a sessão do navegador se perderam','miss');renderDetail(id,'legacy',{lost:n})};
+  }else{
+    document.getElementById('other').onclick=()=>{const g=S.groups.find(x=>x.loaded)||S.groups[0],r=api.otherTab(id,g.id);applyCalc(res(work(id)),true);paint();reloadGroups();drawBar();
+      toast(`Outra aba sua editou “${r.name}” (qtd ${r.from} → ${r.to}) no mesmo rascunho. Esta aba foi avisada e recarregou: nada se perde e nada diverge.`,'')};
+    document.getElementById('other2').onclick=()=>{const d=draftOf(id);
+      toast(d?`Outro usuário tentou abrir #${id}: bloqueado. O seu rascunho não salvo segura o bloqueio; se você não editar mais, os dois expiram em ${mmss(DRAFT_TTL_MS-(Date.now()-d.touched))}.`:`Outro usuário abriu #${id} normalmente: não há rascunho seu segurando o bloqueio.`,'warn')};
+    document.getElementById('crash').onclick=()=>{log('(queda de energia) a aba fechou; o rascunho continua no redis-data','hit');renderDetail(id,'new',{recovered:true})};
+  }
+  const bar=document.getElementById('draftbar');
+  const drawBar=()=>{if(!bar.isConnected)return;
+    if(L){bar.innerHTML=`<span class="dot ${S.dirty?'warn':''}"></span><span>${S.dirty?`<b>${plural(S.dirty,'alteração','alterações')}</b> só nesta página (navegador)`:'Nenhuma alteração pendente'} · salvamento automático em <b id="bar-time">${mmss(S.autoAt-Date.now())}</b></span><span class="sp"></span><button id="b-auto" title="Dispara agora o salvamento automático">Avançar 5 min</button><button class="primary" id="b-save">Salvar</button>`;
+      bar.querySelector('#b-save').onclick=()=>lSave('manual');bar.querySelector('#b-auto').onclick=()=>lSave('auto');return}
+    const d=draftOf(id),n=d?d.changes.size:0;
+    bar.innerHTML=`<span class="dot ${n?'warn':''}"></span><span>${n?`Rascunho no servidor · <b>${plural(n,'alteração não salva','alterações não salvas')}</b> · expira em <b id="bar-time">${mmss(DRAFT_TTL_MS-(Date.now()-d.touched))}</b> (renova a cada edição)`:'Sem alterações não salvas'}</span><span class="sp"></span><button id="b-discard" ${n?'':'disabled'}>Descartar</button><button class="primary" id="b-save" ${n?'':'disabled'}>Salvar alterações</button>`;
+    bar.querySelector('#b-save').onclick=async()=>{const r=await api.commitDraft(id);applyCalc(r,true);paint();S.groups.forEach(g=>{g.subC=workG(id,g.id).subC});
+      toast(`${plural(r.changes,'alteração gravada','alterações gravadas')} no banco numa única transação. Só o que mudou foi enviado.`,'');setMx('Salvar alterações',{lat:r.lat,touched:r.changes,payload:r.payload})};
+    bar.querySelector('#b-discard').onclick=()=>{api.discardDraft(id);toast('Alterações descartadas: o orçamento voltou ao último salvamento.','');renderDetail(id,'new')}};
+  const tick=()=>{const el=document.getElementById('bar-time');
+    if(L){if(Date.now()>=S.autoAt){lSave('auto');return}if(el)el.textContent=mmss(S.autoAt-Date.now());return}
+    const d=draftOf(id);if(!d){if(el)drawBar();return}if(el)el.textContent=mmss(DRAFT_TTL_MS-(Date.now()-d.touched))};
 
   /* --- orçamentos vinculados (profundidade máxima 1) --- */
   const drawLinks=()=>{const el=document.getElementById('links');if(!el)return;
@@ -513,7 +575,9 @@ async function renderDetail(id,mode='new'){
     el.querySelector('.gn').onchange=e=>api.patchGroup(id,g.id,{name:e.target.value});el.querySelector('.cat').onchange=e=>api.patchGroup(id,g.id,{category:e.target.value});
     el.querySelector('.g-head').onclick=()=>{el.classList.toggle('open');if(el.classList.contains('open')&&!g.loaded)openGroup(g)};
   });
-  paint(false);drawLinks();
+  paint(false);drawLinks();drawBar();barTimer=setInterval(tick,1000);
+  if(opts.lost!==undefined)toast(opts.lost?`Queda de energia: ${opts.lost===1?'1 alteração feita só na página se perdeu':opts.lost+' alterações feitas só na página se perderam'}. O orçamento voltou ao último salvamento.`:'Queda de energia: não havia alterações pendentes.','bad');
+  if(opts.recovered)toast(B.draft?`Você tem ${plural(B.draft.changes,'alteração não salva','alterações não salvas')} desde ${hhmm(B.draft.since)}. Estavam no rascunho do servidor e foram recuperadas.`:'Não havia rascunho: nada a recuperar.','');
 }
 function setupSearch(wrap,onPick,legacy){
   const inp=wrap.querySelector('.s');let box=null,res=[],sel=-1;
@@ -559,17 +623,18 @@ function renderCompare(){
   <h3 style="margin:28px 0 12px">O que acontece em uma edição</h3>
   <div class="grid2">
    <div class="card flow bad"><h3>Legada <span class="pill" style="--c:var(--bad)">O(n) no cliente e no servidor</span></h3><ol>
-    <li>Usuário altera a quantidade de 1 item</li><li>jQuery percorre <b>todas</b> as N linhas lendo inputs e parseando texto “R$ 1.234,56”</li><li>Recalcula tudo em JS (float) e regrava N células, com a tela travada</li><li>Serializa N itens e grava no <b>localStorage</b></li><li>POST do <b>orçamento inteiro</b> (cabeçalho, todos os grupos, todos os itens) até os EUA (~175 ms de RTT + upload)</li><li>C# desserializa, recalcula em <b>decimal</b> e grava todas as linhas numa transação: CPU de 4 vCPU compartilhada entre todos os usuários</li><li>O valor do servidor pode divergir do que o usuário viu</li></ol></div>
-   <div class="card flow good"><h3>Nova <span class="pill" style="--c:var(--good)">O(1) no servidor</span></h3><ol>
-    <li>Usuário altera a quantidade de 1 item</li><li><code>PATCH /items/:id</code> com só o campo alterado + <code>If-Match: version</code> (~150 B)</li><li>Transação no Postgres e <b>delta</b> em centavos inteiros no subtotal do grupo (Redis)</li><li>Servidor soma subtotais + totais dos orçamentos vinculados e devolve o total; o front só exibe</li><li>Evento na fila (BullMQ) reindexa o orçamento no Elasticsearch</li><li>Versão desatualizada → <b>409</b>, o front recarrega o grupo</li></ol>
-    <p class="muted sm" style="margin-top:10px">A edição paga o RTT de qualquer forma. Como o cálculo é feito com inteiros, a mesma função pode rodar no front para dar resposta otimista sem risco de divergir.</p></div></div>
+    <li>Usuário altera a quantidade de 1 item</li><li>jQuery percorre <b>todas</b> as N linhas lendo inputs e parseando texto “R$ 1.234,56”</li><li>Recalcula tudo em JS (float) e regrava N células, com a tela travada</li><li>A alteração fica <b>só na página</b> e no <b>localStorage</b>: uma queda de energia a perde</li><li>No botão Salvar <b>ou a cada 5 minutos</b>, POST do <b>orçamento inteiro</b> até os EUA, inclusive o que era só simulação</li><li>C# desserializa, recalcula em <b>decimal</b> e grava todas as linhas numa transação; o valor pode divergir do que o usuário viu</li></ol></div>
+   <div class="card flow good"><h3>Nova <span class="pill" style="--c:var(--good)">rascunho no servidor</span></h3><ol>
+    <li>Usuário altera a quantidade de 1 item</li><li><code>PATCH</code> ao <b>rascunho</b> dele no <code>redis-data</code>, com só o campo alterado (~150 B)</li><li><b>Delta</b> em centavos inteiros no subtotal do grupo; o servidor devolve o total e o front só exibe</li><li>Nada vai ao Postgres: dá para simular à vontade, e uma queda não perde nada por 30 min</li><li>Em <b>“Salvar alterações”</b>, uma transação grava <b>só o changeset</b> e a fila reindexa a busca</li><li>“Descartar” apaga o rascunho; abas do mesmo usuário compartilham o mesmo rascunho</li></ol>
+    <p class="muted sm" style="margin-top:10px">A edição paga o RTT até o rascunho. Como o cálculo é feito com inteiros, a mesma função pode rodar no front para dar resposta otimista sem risco de divergir.</p></div></div>
   <h3 style="margin:28px 0 12px">Problemas da arquitetura antiga e a correção</h3>
   <div class="issues">${[
    ['Float no JS × decimal no C#','O navegador calculava em float e o servidor em decimal, e os dois não batiam em centavos. Paliativo da época, com aval do cliente: arredondar <b>sempre para cima</b> em todo cálculo, para errar a favor da empresa. Em float até o ceil falha (1,1 × 100 = 110,00000000000001 → 111).','<b>Correção:</b> tudo inteiro: centavos (×100) e pontos-base (×100). Só há arredondamento nas divisões, com uma regra padrão, igual no front e no back. Sem divergência, o paliativo do ceil deixa de ser necessário.'],
    ['Orçamento dentro de orçamento','O total do pai depende do total (já ajustado) dos filhos. A tela do pai guarda uma cópia do filho, que envelhece. A regra de profundidade 1 vivia espalhada.','<b>Correção:</b> o servidor soma os totais atuais dos filhos a cada cálculo e valida a profundidade (422). Sem cópia no cliente.'],
    ['Ambiente de produção ≠ dev','Em dev (rede local) parecia ok. Na VPS dos EUA, cada ida e volta custa ~175 ms, o payload de milhares de linhas cruza a rede e 4 vCPUs são divididas entre os usuários.','<b>Correção:</b> poucas chamadas, payloads pequenos, itens paginados, cache no Redis e trabalho pesado fora do caminho da requisição.'],
    ['Recalcular tudo a cada edição','Custo cresce com o nº de itens: milhares de linhas lidas e reescritas por clique, com a tela travada.','<b>Correção:</b> subtotal por grupo mantido por delta; total = soma de N grupos + filhos.'],
-   ['Bloqueio no banco e várias abas','Abrir marcava o orçamento como “aberto” e barrava outros usuários, mas o mesmo usuário em duas abas tinha dois estados (localStorage + página): a aba desatualizada salvava por cima da outra.','<b>Correção:</b> bloqueio com expiração no Redis, versão por grupo (409) e abas sincronizadas por <code>BroadcastChannel</code>.'],
+   ['Bloqueio no banco e várias abas','Abrir marcava o orçamento como “aberto” e barrava outros usuários, mas o mesmo usuário em duas abas tinha dois estados (localStorage + página): a aba desatualizada salvava por cima da outra.','<b>Correção:</b> rascunho único no servidor, compartilhado pelas abas, que segura o bloqueio com o mesmo TTL de 30 min.'],
+   ['Salvamento automático a cada 5 minutos','Para não perder o que ficava só na página, o sistema salvava sozinho a cada 5 min, gravando simulações que o usuário não queria salvar.','<b>Correção:</b> rascunho no servidor e botão “Salvar alterações”; sem salvamento automático.'],
    ['Salvar o orçamento inteiro','Para mudar 1 item, ia o orçamento todo: ex.: 12 grupos e 500+ produtos numa transação.','<b>Correção:</b> <code>PATCH</code> só do que mudou, transação de 1 item + 1 subtotal, edições em lote.'],
    ['Front antigo em cache após o deploy','O navegador mantinha o JS anterior com o back-end novo; telas quebravam até um Ctrl+F5.','<b>Correção:</b> arquivos com hash no nome (Vite), <code>index.html</code> sem cache e aviso de nova versão.'],
    ['Busca acoplada ao banco relacional','Filtros e texto livre via LIKE sobre as mesmas tabelas da escrita, disputando CPU com os saves.','<b>Correção:</b> índice no Elasticsearch atualizado por fila; Postgres fica com a escrita.']
@@ -591,12 +656,13 @@ async function runCompare(){
     const open={l:{c:lo.ms,n:T({down:n*rowHtmlLen,srv:25+.12*n})},w:{c:no.ms,n:T({down:pageBytes,srv:25+1.2})}};
     const edit={l:{c:le.ms,n:T({up:upAll,down:300,srv:15+.1*n})},w:{c:nCli,n:T({up:150,down:500,srv:4})}};
     const reord={l:{c:lr.ms,n:T({up:upAll,down:300,srv:15+.1*n})},w:{c:nCli,n:T({up:120,down:100,srv:3})}};
+    const save={l:T({up:upAll,down:300,srv:15+.1*n}),w:T({up:200+10*160,down:500,srv:8+30})};
     const marg={l:{c:lm.ms,n:T({up:250,down:300,srv:20})},w:{c:nCli,n:T({up:150,down:400,srv:4})}};
     const f=x=>x<10?x.toFixed(1):Math.round(x).toLocaleString('pt-BR');
     const bar=(v,m)=>`<div class="bar-t"><i style="width:${Math.max(3,Math.min(100,v/m*100))}%"></i></div>`;
     const two=(a,b)=>Math.max(a,b,1);
     const cellOpen=x=>`<div class="v">Tela: ${f(x.c+x.n)} ms</div><div class="s">${f(x.c)} ms no navegador · ${f(x.n)} ms rede+servidor</div>`;
-    const cellSave=(x,legacy)=>legacy?`<div class="v">Tela: ${f(x.c)} ms <span class="s">(travada)</span></div><div class="v">Salvo: ${f(x.c+x.n)} ms</div>`:`<div class="v">Tela: ${f(x.c+x.n)} ms</div><div class="v">Salvo: ${f(x.c+x.n)} ms</div>`;
+    const cellSave=(x,legacy)=>legacy?`<div class="v">Tela: ${f(x.c)} ms <span class="s">(travada)</span></div><div class="s">fica só na página; vai ao servidor no Salvar ou a cada 5 min</div>`:`<div class="v">Tela: ${f(x.c+x.n)} ms</div><div class="s">já protegida no rascunho do servidor; vai ao banco em “Salvar alterações”</div>`;
     const row=(name,l,w,why,m)=>`<tr><td><b>${name}</b></td><td class="c-leg">${l}${m?bar(m[0],two(...m)):''}</td><td class="c-new">${w}${m?bar(m[1],two(...m)):''}</td><td class="muted sm">${why}</td></tr>`;
     const srvL=srvMs(15+.1*n),srvN=srvMs(4);
     const c=budget(1043),p=budget(1042),d0=CATALOG[0].priceC;
@@ -604,13 +670,16 @@ async function runCompare(){
     const E=ENVS[ENV.key];
     document.getElementById('cb').innerHTML=[
       row(`Abrir o grupo grande (${n.toLocaleString('pt-BR')} itens)`,cellOpen(open.l)+`<div class="s">${kb(n*rowHtmlLen)} de HTML · ${lo.nodes.toLocaleString('pt-BR')} nós DOM</div>`,cellOpen(open.w)+`<div class="s">${kb(pageBytes)} · 25 itens da página</div>`,'Legada traz e renderiza todas as linhas, e grava tudo no localStorage. Nova traz uma página do Redis.',[open.l.c+open.l.n,open.w.c+open.w.n]),
-      row('Editar 1 quantidade',cellSave(edit.l,true)+`<div class="s">${le.iterated.toLocaleString('pt-BR')} linhas varridas · POST do orçamento inteiro: ${kb(upAll)}</div>`,cellSave(edit.w,false)+`<div class="s">1 item · PATCH de ~150 B</div>`,'Legada responde local, mas trava a tela e depois sobe o orçamento inteiro. Nova paga o RTT e envia só o delta; com inteiros dá para ser otimista.',[edit.l.c+edit.l.n,edit.w.c+edit.w.n]),
-      row('Reordenar 1 item',cellSave(reord.l,true)+`<div class="s">reposição no DOM + POST do orçamento inteiro: ${kb(upAll)}</div>`,cellSave(reord.w,false)+`<div class="s">só a posição do item (índice fracionário)</div>`,'Na legada reordenar reenvia o orçamento inteiro. Na nova muda uma posição.',[reord.l.c+reord.l.n,reord.w.c+reord.w.n]),
-      row('Alterar a margem (%)',cellSave(marg.l,true)+`<div class="s">${lm.iterated.toLocaleString('pt-BR')} linhas varridas</div>`,cellSave(marg.w,false)+`<div class="s">subtotais + filhos, 0 itens lidos</div>`,'A margem só reaplica a taxa sobre os subtotais.',[marg.l.c+marg.l.n,marg.w.c+marg.w.n]),
+      row('Editar 1 quantidade',cellSave(edit.l,true)+`<div class="s">${le.iterated.toLocaleString('pt-BR')} linhas varridas</div>`,cellSave(edit.w,false)+`<div class="s">1 item · PATCH de ~150 B ao rascunho</div>`,'Legada responde local, mas trava a tela. Nova paga o RTT, e em troca a edição não se perde numa queda; com inteiros dá para ser otimista.',[edit.l.c,edit.w.c+edit.w.n]),
+      row('Reordenar 1 item',cellSave(reord.l,true)+`<div class="s">reposição no DOM + recálculo de tudo</div>`,cellSave(reord.w,false)+`<div class="s">só a posição do item (índice fracionário)</div>`,'Na legada, reordenar recalcula tudo e entra no próximo salvamento do orçamento inteiro. Na nova muda uma posição no rascunho.',[reord.l.c,reord.w.c+reord.w.n]),
+      row('Alterar a margem (%)',cellSave(marg.l,true)+`<div class="s">${lm.iterated.toLocaleString('pt-BR')} linhas varridas</div>`,cellSave(marg.w,false)+`<div class="s">subtotais + filhos, 0 itens lidos</div>`,'A margem só reaplica a taxa sobre os subtotais.',[marg.l.c,marg.w.c+marg.w.n]),
+      row('Salvar 10 alterações',`<div class="v">${f(save.l)} ms</div><div class="s">POST do orçamento inteiro: ${kb(upAll)}, ${n.toLocaleString('pt-BR')} linhas gravadas</div>`,`<div class="v">${f(save.w)} ms</div><div class="s">só o changeset: 10 itens, ~${kb(200+10*160)}</div>`,'Salvar custa proporcional ao que mudou, não ao tamanho do orçamento.',[save.l,save.w]),
+      row('Simular valores sem salvar','<div class="v">Gravado em até 5 min</div><div class="s">o salvamento automático grava a simulação no banco</div>','<div class="v">Só grava se o usuário pedir</div><div class="s">“Salvar alterações” grava; “Descartar” desfaz</div>','Numa cotação, simular sem compromisso é parte do trabalho.'),
+      row('Queda de energia ou navegador fechado','<div class="v">Perde o que não foi salvo</div><div class="s">até 5 min de trabalho, que estava só na página</div>','<div class="v">Recupera o rascunho</div><div class="s">fica no servidor por 30 min desde a última edição</div>','O estado da edição sai do navegador e vai para o servidor.'),
       row(`CPU do servidor por salvamento (${E.cores} vCPU, ${ENV.users} usuários)`,`<div class="v">${srvL.toLocaleString('pt-BR')} ms</div><div class="s">desserializa ${n.toLocaleString('pt-BR')} itens, recalcula e atualiza ${n.toLocaleString('pt-BR')} linhas</div>`,`<div class="v">${srvN.toLocaleString('pt-BR')} ms</div><div class="s">1 item + incremento inteiro no Redis</div>`,'Com poucas vCPUs, o custo por requisição vira fila quando há vários usuários.',[srvL,srvN]),
       row('Armazenamento no navegador',lo.ok===true?`<div class="v">${kb(lsB)} no localStorage</div><div class="s">cota ~5 MB por origem</div>`:lo.ok==='quota'?'<div class="v">Cota estourada: cache não grava</div>':`<div class="v">${kb(sizeOf(L.items)*2)} iriam ao localStorage</div><div class="s">(bloqueado neste ambiente)</div>`,'<div class="v">0 B</div><div class="s">estado fica no Redis</div>','localStorage tem cota por origem e não é compartilhado entre usuários.'),
-      row('Dois usuários no mesmo orçamento','<div class="v">Segundo usuário bloqueado</div><div class="s">marcação “aberto” no banco, liberada ao sair da tela</div>','<div class="v">Bloqueio com expiração</div><div class="s">Redis com TTL renovado; se o navegador fechar, expira sozinho</div>','A regra de negócio continua; muda onde o bloqueio vive.'),
-      row('Mesmo orçamento em duas abas','<div class="v">Aba desatualizada apaga a outra</div><div class="s">cada aba tem seu estado; o bloqueio não cobre o mesmo usuário</div>','<div class="v">Detecta e sincroniza</div><div class="s">PATCH com If-Match antigo → 409; BroadcastChannel avisa as outras abas</div>','Estado na página × servidor como fonte da verdade.'),
+      row('Dois usuários no mesmo orçamento','<div class="v">Segundo usuário bloqueado</div><div class="s">marcação “aberto” no banco, liberada ao sair da tela</div>','<div class="v">Bloqueio preso ao rascunho</div><div class="s">mesmo TTL de 30 min do rascunho; se for abandonado, os dois expiram</div>','A regra de negócio continua; muda onde o bloqueio vive.'),
+      row('Mesmo orçamento em duas abas','<div class="v">Aba desatualizada apaga a outra</div><div class="s">cada aba tem seu estado; o bloqueio não cobre o mesmo usuário</div>','<div class="v">Mesmo rascunho</div><div class="s">as abas editam o mesmo rascunho no servidor e são avisadas a cada edição</div>','Estado na página × servidor como fonte da verdade.'),
       row('Precisão do total',`<div class="v">JS (float + ceil) ${brl(jsT)}</div><div class="v">C# (decimal + ceil) ${fmtC(decC)}</div><div class="s">diferença ${brl(jsT-decC/100)} entre o que o usuário vê e o que o servidor grava, mesmo com o paliativo</div>`,`<div class="v">${fmtC(newC)}</div><div class="s">front e servidor idênticos (só inteiros, arredondamento comercial). Sem ceil: ${fmtC(decC-newC)} a menos que o paliativo cobrava a mais</div>`,'O ceil só reduzia a perda e enviesava o total para cima. Com inteiros a divergência some na origem e o paliativo sai.'),
       row('Alterar o orçamento filho','<div class="v">Pai desatualizado</div><div class="s">a tela do pai guarda uma cópia do total do filho; o pai erra '+fmtC(parentDelta)+' a cada unidade, até recarregar</div>','<div class="v">Pai correto</div><div class="s">o servidor soma o total atual de cada filho (1 nível) a cada cálculo</div>','Total do pai = (subtotais + totais dos filhos) com o prazo e a margem do pai.')
     ].join('');
