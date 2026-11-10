@@ -5,3 +5,5 @@ dist/
 prototype/
 # documentos: formatação manual
 *.md
+# versão legada (C#): formatada pelo dotnet format
+legacy/
