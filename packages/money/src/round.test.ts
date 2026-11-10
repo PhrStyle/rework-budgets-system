@@ -1,6 +1,12 @@
+import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 
-import { divRoundHalfUp } from './round.js';
+import { divRoundHalfUp, mulDivRoundHalfUp } from './round.js';
+
+/** Referência: arredondamento comercial em aritmética exata. */
+function halfUpBig(numerator: bigint, denominator: bigint): bigint {
+  return (2n * numerator + denominator) / (2n * denominator);
+}
 
 describe('divRoundHalfUp', () => {
   it('mantém divisões exatas', () => {
@@ -16,11 +22,6 @@ describe('divRoundHalfUp', () => {
     expect(divRoundHalfUp(4, 10)).toBe(0); // 0,4 → 0
   });
 
-  it('calcula um item com desconto em centavos: R$ 1.234,56 × 3 com 7,5%', () => {
-    // 123456 × 3 × (10000 − 750) / 10000 = 342590,4 → 342590 (R$ 3.425,90)
-    expect(divRoundHalfUp(123456 * 3 * (10000 - 750), 10000)).toBe(342590);
-  });
-
   it('é exato perto do limite de inteiros seguros', () => {
     const max = Number.MAX_SAFE_INTEGER; // 9007199254740991
     expect(divRoundHalfUp(max, 1)).toBe(max);
@@ -28,15 +29,14 @@ describe('divRoundHalfUp', () => {
     expect(divRoundHalfUp(max - 1, 2)).toBe(4503599627370495);
   });
 
-  it('nunca erra mais de meio divisor (conferido contra BigInt)', () => {
-    for (let numerator = 0; numerator <= 2000; numerator += 7) {
-      for (const denominator of [1, 2, 3, 7, 10, 100, 10000]) {
-        const n = BigInt(numerator);
-        const d = BigInt(denominator);
-        const expected = (2n * n + d) / (2n * d); // meio para cima, em aritmética exata
-        expect(divRoundHalfUp(numerator, denominator)).toBe(Number(expected));
-      }
-    }
+  it('bate com a referência exata para quaisquer inteiros seguros', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: Number.MAX_SAFE_INTEGER }),
+        fc.integer({ min: 1, max: Number.MAX_SAFE_INTEGER }),
+        (n, d) => divRoundHalfUp(n, d) === Number(halfUpBig(BigInt(n), BigInt(d))),
+      ),
+    );
   });
 
   it('rejeita entradas que não são inteiros seguros', () => {
@@ -50,5 +50,35 @@ describe('divRoundHalfUp', () => {
     expect(() => divRoundHalfUp(10, 0)).toThrow(RangeError);
     expect(() => divRoundHalfUp(10, -2)).toThrow(RangeError);
     expect(() => divRoundHalfUp(-10, 3)).toThrow(RangeError);
+  });
+});
+
+describe('mulDivRoundHalfUp', () => {
+  it('suporta produtos intermediários acima de 2^53', () => {
+    // R$ 10 milhões × 1.000 un × 10000 = 10^16, acima de 2^53 ≈ 9 × 10^15
+    expect(mulDivRoundHalfUp([1_000_000_000, 100_000, 10_000], 1_000_000)).toBe(1_000_000_000_000);
+  });
+
+  it('bate com a referência exata', () => {
+    fc.assert(
+      fc.property(
+        fc.array(fc.integer({ min: 0, max: 1_000_000_000 }), { minLength: 1, maxLength: 3 }),
+        fc.integer({ min: 1, max: 1_000_000 }),
+        (factors, d) => {
+          const product = factors.reduce((p, f) => p * BigInt(f), 1n);
+          const expected = halfUpBig(product, BigInt(d));
+          fc.pre(expected <= BigInt(Number.MAX_SAFE_INTEGER));
+          return mulDivRoundHalfUp(factors, d) === Number(expected);
+        },
+      ),
+    );
+  });
+
+  it('recusa resultado que não cabe num inteiro seguro', () => {
+    expect(() => mulDivRoundHalfUp([Number.MAX_SAFE_INTEGER, 10], 1)).toThrow(RangeError);
+  });
+
+  it('recusa fator negativo', () => {
+    expect(() => mulDivRoundHalfUp([10, -1], 1)).toThrow(RangeError);
   });
 });
