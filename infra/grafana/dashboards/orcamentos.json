@@ -187,7 +187,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (cache) (rate(budgets_cache_requests_total{result=\"hit\"}[5m])) / sum by (cache) (rate(budgets_cache_requests_total[5m]))",
+          "expr": "sum by (cache) (rate(budgets_cache_requests_total{result=\"hit\"}[1m])) / sum by (cache) (rate(budgets_cache_requests_total[1m]))",
           "legendFormat": "{{cache}}"
         }
       ]
@@ -265,7 +265,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(budgets_search_index_lag_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(budgets_search_index_lag_seconds_bucket[1m])))",
           "legendFormat": "mediana"
         },
         {
@@ -274,7 +274,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(budgets_search_index_lag_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(budgets_search_index_lag_seconds_bucket[1m])))",
           "legendFormat": "p95"
         }
       ]

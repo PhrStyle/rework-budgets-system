@@ -50,12 +50,17 @@ export default tseslint.config(
     rules: { '@typescript-eslint/no-unnecessary-type-parameters': 'off' },
   },
   {
+    // Gravação dos GIFs: Node, com funções que rodam dentro do navegador (page.evaluate).
+    files: ['docs/gif/**/*.mjs'],
+    languageOptions: { globals: { ...globals.node, ...globals.browser } },
+  },
+  {
     // Scripts do k6 (benchmark): globais que o próprio k6 injeta.
     files: ['bench/k6/**/*.js'],
     languageOptions: { globals: { __ENV: 'readonly', __VU: 'readonly', __ITER: 'readonly' } },
   },
   {
-    files: ['**/*.js'],
+    files: ['**/*.js', '**/*.mjs'],
     ...tseslint.configs.disableTypeChecked,
   },
   prettier,

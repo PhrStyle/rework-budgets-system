@@ -1,10 +1,3 @@
-<!--
-  ESQUELETO DO README
-  - Trechos entre ⟨ ⟩ são para preencher.
-  - "—" nas tabelas = número ainda não medido. Preencher só com medições reais (ver "Como medimos").
-  - ⟨decidir: …⟩ marca decisões de projeto ainda em aberto.
--->
-
 # Orçamentos v2 · reescrita de um sistema de orçamentos
 
 > Um sistema de orçamentos em que trabalhei tinha problemas de **arquitetura e de lógica**: o *como* tinha sido decidido, não o *quê*. Este repositório reconstrói o problema de forma genérica e mostra **como eu resolveria cada um**, com medições lado a lado.
@@ -24,6 +17,7 @@
 - [Regras de negócio](#regras-de-negócio)
 - [Problemas e soluções](#problemas-e-soluções)
 - [Antiga × nova: números](#antiga--nova-números)
+- [Monitoramento](#monitoramento)
 - [Arquitetura](#arquitetura)
 - [Estudos de caso](#estudos-de-caso)
 - [Como medimos](#como-medimos)
@@ -41,8 +35,9 @@
 - **Depois:** a edição vai para um **rascunho no Redis** e só vira oficial em “Salvar alterações”; o servidor calcula com **inteiros**, por **delta**; a busca vai para o **Elasticsearch**; o front só exibe.
 - **Resultado:** salvar 1 alteração no pior caso real (1.000 itens), com a rede da VPS emulada: **1,1 s → 170 ms** com 1 usuário e **1,8 s → 169 ms** com 16 ao mesmo tempo, enquanto o Postgres cai de **101% para 8% de CPU**; e a tela mostra o mesmo total que fica salvo.
 
-<!-- GIF curto: abrir orçamento grande na legada vs nova, lado a lado (docs/img/antes-depois.gif) -->
-<!-- ![Antiga × nova](docs/img/antes-depois.gif) -->
+![As duas versões fazendo a mesma coisa, lado a lado, no ambiente que emula a VPS](docs/img/comparativo-legada-nova.gif)
+
+*As duas versões ao mesmo tempo, no mesmo orçamento de 1.000 itens, com a rede da VPS emulada (150 ms): abrir, abrir um grupo, mudar uma quantidade, salvar e mudar a margem. A legenda de cada lado mostra quanto cada ação levou no navegador. Na legada, salvar e mudar a margem enviam o orçamento inteiro e recarregam a página; na nova, cada ação é uma ida ao servidor. Abrir o orçamento é mais lento na nova (o clique em “Editar” é mais uma ida). Gravado com [`docs/gif/`](docs/gif/).*
 
 ---
 
@@ -51,7 +46,7 @@
 | | |
 |---|---|
 | **Produto** | Sistema de orçamentos: listagem com filtros; orçamento com cabeçalho (cliente, vendedor, status, ajuste de prazo %, margem %), grupos personalizáveis e produtos com busca, quantidade, desconto por item e ordenação |
-| **Escala** | Orçamentos com ⟨milhares⟩ de produtos; orçamentos podem conter outros orçamentos (1 nível) |
+| **Escala** | Mais de 3 mil orçamentos e 5 mil produtos no catálogo; os maiores com 15 grupos e 1.000 itens; orçamentos podem conter outros orçamentos (1 nível) |
 | **Stack original** | C# · Razor Pages (front) + API ASP.NET (back), em projetos separados · jQuery · JavaScript · `localStorage` · PostgreSQL + Entity Framework |
 | **Infra original** | VPS Contabo, US Central; usuários no Brasil |
 | **Meu papel** | Engenheiro de software, único desenvolvedor do sistema |
@@ -149,7 +144,7 @@ Agrupados por tema; os números são os mesmos dos estudos de caso e do diagrama
 |---|---|---|---|---|
 | 13 | jQuery → front (Razor) → API → front → jQuery | Dois servidores e duas serializações por chamada; endpoints e DTOs duplicados | O navegador chama uma API só, com contratos compartilhados | requisições por rodada: 39 → 10 |
 | 6 | Aceitável em dev, lento na VPS dos EUA | Latência e CPU de produção invisíveis no dev | Projeto pensado para latência; benchmark num ambiente que emula a VPS | salvar: 1,1 s → 170 ms |
-| 3 | Busca e filtro de orçamentos ⟨como era⟩ | ⟨lentidão / filtros limitados⟩ | Índice de busca (Elasticsearch) atualizado por fila | “farmacia”: 0 → 182 resultados |
+| 3 | Busca e filtro com `LIKE '%termo%'` no banco | Sem o acento exato, não acha nada; sem tolerância a erro de digitação | Índice de busca (Elasticsearch) atualizado por fila | “farmacia”: 0 → 182 resultados |
 | 9 | Depois de cada deploy, o navegador usava o JS antigo com o back novo; a saída era Ctrl+F5 | Telas quebradas que pareciam bugs; perda de confiança no time | Arquivos com hash no nome, aviso de nova versão, contratos compartilhados | Ctrl+F5 após deploy: sim → não |
 
 ### Por que trocar de stack?
@@ -197,32 +192,50 @@ Resultados brutos: `bench/results/*.json` (gerados pelo k6, fora do git). Medido
 
 ---
 
+## Monitoramento
+
+![Painel do Grafana durante a carga de 16 usuários, com o Elasticsearch caindo e voltando](docs/img/monitoramento-grafana.gif)
+
+*Painel do Grafana (Prometheus coletando a API e o worker) durante a carga de 16 usuários no ambiente “VPS”, acelerado 6x. No meio, o Elasticsearch é desligado por ~1 minuto: em “Buscas por motor”, a busca passa para o Postgres de reserva; em “Tarefas na fila”, as indexações ficam esperando em retentativa; quando o Elasticsearch volta, a fila esvazia sozinha e nada se perde.*
+
+![Alerta disparado no Prometheus](docs/img/alertas-prometheus.png)
+
+*Os alertas durante a queda: `BuscaNoPostgres`, o esperado, e `IndexacaoFalhando`, que **não era esperado**. Numa queda anterior, de ~1,5 min mais o tempo de o Elasticsearch reiniciar, 278 indexações esgotaram as 8 tentativas, que somavam só ~2 min de espera (a linha das tarefas em `failed` no painel). O alerta fez o papel dele, e a correção foi subir para 12 tentativas, que cobrem ~68 min de queda; as que falham ficam guardadas com o erro e podem ser reprocessadas. As [11 regras](infra/prometheus/alertas.yml) dizem o porquê de cada alerta e o que conferir primeiro.*
+
+---
+
 ## Arquitetura
 
 ### Antes
 
 ```mermaid
 flowchart LR
-  B[Navegador<br/>jQuery + localStorage<br/>calcula tudo em float] -- "HTML do grupo inteiro" --> B
-  B -- "POST do orçamento/grupo inteiro" --> S[Servidor C#<br/>Razor Pages<br/>recalcula em decimal]
-  S --> D[(Banco)]
+  B["Navegador<br/>jQuery + localStorage<br/>calcula em float"] -- "toda chamada: /front/..." --> F["Front Razor Pages<br/>repassa à API"]
+  F --> S["API C#<br/>recalcula em decimal (+ ceil)"]
+  S --> D[("PostgreSQL")]
+  B -. "Salvar e mudar a margem:<br/>o orçamento inteiro, e recarrega a página" .-> F
 ```
 
 ### Depois
 
 ```mermaid
 flowchart LR
-  B[Navegador<br/>só exibe] -- "edição: PATCH pequeno" --> A[API NestJS<br/>calcula com inteiros]
-  A <--> D[(Redis data<br/>rascunho do usuário)]
-  A -- "Salvar alterações:<br/>só o changeset" --> P[(PostgreSQL<br/>fonte da verdade)]
-  A <--> R[(Redis cache<br/>cópias do banco)]
-  A -- evento --> Q[BullMQ worker]
-  Q --> E[(Elasticsearch<br/>busca)]
-  B -- "busca" --> A
-  A -- "consulta" --> E
+  U["Navegador<br/>React: só exibe"] -- "um endereço" --> N["nginx<br/>tela estática + /api"]
+  N --> A["API NestJS<br/>calcula com inteiros"]
+  A <-- "rascunho (segura o bloqueio)" --> RD[("redis-data<br/>rascunhos e filas")]
+  A <-- "cópias com a versão na chave" --> RC[("redis-cache")]
+  A -- "Salvar: só o que mudou<br/>+ aviso no outbox, numa transação" --> P[("PostgreSQL<br/>fonte da verdade")]
+  A -- "listagem e autocomplete" --> E[("Elasticsearch")]
+  P -. "outbox" .-> W["Worker<br/>relay + BullMQ"]
+  W <--> RD
+  W -- "indexa (versão externa)" --> E
+  A -. "métricas" .-> M["Prometheus + Grafana"]
+  W -. "métricas" .-> M
+  U -. "erros" .-> ST["Sentry"]
+  A -. "erros" .-> ST
 ```
 
-Uma edição vai só para o rascunho do usuário no Redis, e a API devolve os totais recalculados por delta. “Salvar alterações” grava no Postgres, numa transação, apenas o que mudou, e publica a reindexação no Elasticsearch por fila. A tela do orçamento lê do rascunho, do cache e do Postgres; a listagem e a busca leem do Elasticsearch.
+Uma edição vai só para o rascunho do usuário no `redis-data`, e a API devolve os totais recalculados por delta. “Salvar alterações” grava no Postgres, numa transação, apenas o que mudou, junto com um aviso no outbox; o worker leva o aviso para a fila e atualiza o Elasticsearch. A tela do orçamento lê do rascunho, do cache e do Postgres; a listagem e o autocomplete leem do Elasticsearch, com o Postgres de reserva. Logs com o mesmo `request_id` em todas as camadas, métricas no Prometheus e erros no Sentry.
 
 ---
 
@@ -232,21 +245,21 @@ Uma edição vai só para o rascunho do usuário no Redis, e a API devolve os to
 
 ### 1. Cálculo do orçamento no navegador
 
-- **Problema:** ⟨O orçamento inteiro era recalculado em JavaScript a cada alteração. Com milhares de itens, …⟩
-- **Impacto:** ⟨tela travada por X ms; regra de cálculo espalhada no front; …⟩
+- **Problema:** O cálculo existia em dois lugares: no navegador, em JavaScript (float), para a tela responder na hora, e no servidor, em C# (`decimal`), que era a fonte da verdade. O JavaScript recalculava lendo os valores de volta do texto da página (“R$ 1.234,56”).
+- **Impacto:** A tela mostrava uma prévia que não batia com o que o servidor gravava, e a mesma regra precisava ser mantida em duas linguagens, com dois tipos numéricos diferentes.
 - **Solução:**
-  - ⟨Cálculo no servidor; subtotal por grupo mantido por delta (novo − antigo)⟩
-  - ⟨Total = soma dos subtotais dos grupos + totais dos filhos; alterar a margem não lê itens⟩
-  - ⟨Totais atômicos no Redis (`HINCRBY`), Postgres como fonte da verdade⟩
+  - O cálculo existe **uma vez**, em `packages/budget-calc` (inteiros), e roda só no servidor; a tela exibe o que a API devolve.
+  - O subtotal de cada grupo é mantido por **delta** (novo − antigo): editar um item lê só aquele item.
+  - Total = subtotais dos grupos + totais atuais dos filhos → prazo → margem (`calcFromSubtotals`): mudar a margem não lê item nenhum.
 
 - **Resultado:**
 
 | Métrica | Antes | Depois |
 |---|---|---|
-| Itens lidos por edição | — | — |
-| Tempo até a tela atualizar | — | — |
+| Itens lidos por edição | todos os da tela (o `recalcular()` relê o DOM) | 1 (o item editado), mais os subtotais guardados |
+| Tempo até a tela atualizar | na hora (prévia em float, que pode não bater com o salvo) | ~157 ms no ambiente “VPS” (1 ida; o total já é o que fica salvo) |
 
-- **Trade-offs:** ⟨Toda edição paga o RTT até o servidor; resposta otimista possível porque o cálculo é inteiro e determinístico.⟩
+- **Trade-offs:** Toda edição paga uma ida ao servidor (~157 ms no ambiente “VPS”) antes de mostrar o total. Uma resposta otimista seria possível, porque o cálculo é inteiro e determinístico, mas foi descartada de propósito: recriaria uma prévia que pode divergir do salvo.
 - **Onde ver:** legada: `recalcular()` em [`orcamento.js`](legacy/src/Budgets.Legacy.Web/wwwroot/js/orcamento.js), que lê o texto “R$ 1.234,56” de volta do DOM · regra nova: [`packages/budget-calc`](packages/budget-calc/src/calc.ts) (`calcFromSubtotals`, `itemDelta`) · na API: o detalhe do orçamento sai dos subtotais guardados, sem ler itens, em [`budgets.service.ts`](apps/api/src/budgets/budgets.service.ts)
 
 ---
@@ -266,13 +279,13 @@ Uma edição vai só para o rascunho do usuário no Redis, e a API devolve os to
 | Métrica | Antes | Depois |
 |---|---|---|
 | Ler o maior grupo do pior caso real (87 itens) · só a API, mesma máquina | ~2 ms (sem cache no servidor) | ~6 ms sem cache → **~2,7 ms** com cache |
-| Abrir o cabeçalho e o resumo dos grupos · só a API, mesma máquina | — | ~5 ms sem cache → **~2,3 ms** com cache |
+| Abrir o cabeçalho e o resumo dos grupos · só a API, mesma máquina | sem cache no servidor | ~5 ms sem cache → **~2,3 ms** com cache |
 | Dado velho depois de salvar | sem validação; chaves órfãs (15 no pior caso) | nenhum (versão na chave; teste automatizado) |
-| `redis-cache` fora do ar | — | leituras seguem pelo Postgres (~4,4 ms), 1 aviso no log |
+| `redis-cache` fora do ar | não se aplica (sem cache no servidor) | leituras seguem pelo Postgres (~4,4 ms), 1 aviso no log |
 | Armazenamento no navegador | grupos inteiros no `localStorage` | 0 B |
-| Taxa de acerto do cache com uso real | — | ⟨medida no benchmark, etapa 9⟩ |
+| Taxa de acerto no benchmark de carga (Prometheus) | não se aplica | detalhe do orçamento **89%**; itens do grupo perto de 0%, porque cada rodada do teste **salva** o grupo (muda a versão e a chave). Com uso real, em que se lê muito mais do que se salva, a taxa dos itens sobe; não medida com usuários reais |
 
-- **Trade-offs:** O cache guarda o grupo inteiro e pagina em memória: um grupo enorme custa uma chave grande (357 itens ≈ 60 KB no perfil de estresse). O detalhe ainda faz uma consulta curta ao Postgres para saber a versão (a hora da última gravação) antes de ir ao cache. Localmente o ganho é pequeno em valor absoluto; ele importa com carga e com o banco mais longe, o que a etapa 9 mede.
+- **Trade-offs:** O cache guarda o grupo inteiro e pagina em memória: um grupo enorme custa uma chave grande (357 itens ≈ 60 KB no perfil de estresse). O detalhe ainda faz uma consulta curta ao Postgres para saber a versão (a hora da última gravação) antes de ir ao cache. Localmente o ganho é pequeno em valor absoluto; com carga e com o banco mais longe ele tende a crescer, mas não foi medido com e sem cache no ambiente “VPS” (lá foi medida só a taxa de acerto).
 - **Onde ver:** legada: `carregarItens()` em [`orcamento.js`](legacy/src/Budgets.Legacy.Web/wwwroot/js/orcamento.js). Reproduzido: como o salvar apaga e regrava os grupos com ids novos, o `localStorage` fica com chaves de grupos que não existem mais (15 chaves órfãs depois de um salvamento no pior caso) · nova: [`cache.ts`](apps/api/src/cache/cache.ts), uso em [`budgets.service.ts`](apps/api/src/budgets/budgets.service.ts), testes em [`cache.test.ts`](apps/api/src/cache/cache.test.ts) (inclusive com o Redis derrubado no meio), métricas em `GET /api/metrics`
 
 ---
@@ -283,7 +296,7 @@ Uma edição vai só para o rascunho do usuário no Redis, e a API devolve os to
 - **Impacto:** O `LIKE` compara letra por letra: sem o acento exato, não acha nada (“farmacia” não acha “Farmácia”), não tolera erro de digitação, não ordena por relevância, e o `%` no início impede o uso de índice comum.
 - **Solução:**
   - **Elasticsearch** para a listagem de orçamentos e o autocomplete de produtos, com um analisador que tira maiúsculas, acentos e cedilha (`asciifolding`), tolerância a erro de digitação (`fuzziness`) e prefixos indexados (*edge n-gram*) para o autocomplete enquanto se digita. O número do orçamento, se digitado, vem primeiro.
-  - **Índice atualizado por fila, sem perder nenhuma alteração:** o salvar grava um aviso numa tabela `outbox` **na mesma transação** da mudança; um relay leva os avisos para a fila (BullMQ, no `redis-data`) e um worker separado da API atualiza o índice, tentando de novo com espera crescente se o Elasticsearch estiver fora do ar. Se o worker cair no meio de uma tarefa, a trava dela expira e outro worker a retoma.
+  - **Índice atualizado por fila, sem perder nenhuma alteração** (até 12 tentativas, ~68 min de queda do Elasticsearch; ver [Monitoramento](#monitoramento) para o caso em que 8 não bastaram): o salvar grava um aviso numa tabela `outbox` **na mesma transação** da mudança; um relay leva os avisos para a fila (BullMQ, no `redis-data`) e um worker separado da API atualiza o índice, tentando de novo com espera crescente se o Elasticsearch estiver fora do ar. Se o worker cair no meio de uma tarefa, a trava dela expira e outro worker a retoma.
   - **Versão externa no índice:** a versão do documento é a hora da última gravação no Postgres; uma tarefa atrasada não sobrescreve um dado mais novo.
   - **Reindexar sem tirar a busca do ar** (`pnpm v2:reindex`): índice novo com a data no nome, carga em lote e troca do alias numa operação só.
   - **Elasticsearch fora do ar:** a listagem e o autocomplete caem para o `ILIKE` do Postgres, com aviso no log e métrica; a busca piora, mas a tela não quebra.
@@ -301,7 +314,7 @@ Uma edição vai só para o rascunho do usuário no Redis, e a API devolve os to
 | Do salvar até aparecer na busca | imediato (busca direto no banco) | **~1 s** (mediana de 7) |
 
 - **Trade-offs:** Nesta escala (3.201 orçamentos, 5.500 produtos), **a velocidade empata**, e a listagem sem busca é até mais lenta; o ganho é o que a busca **acha**. Em troca, a busca é eventual: ~1 s entre salvar e aparecer, quase todo o *refresh* de 1 s do Elasticsearch, mais o relay (até 500 ms); o detalhe do orçamento continua lendo do Postgres e do cache, sempre exato. É mais um serviço para operar (memória, disco, reindexação).
-- **Onde ver:** legada: [`OrcamentosController.Listar`](legacy/src/Budgets.Legacy.Api/Controllers/OrcamentosController.cs) e [`CatalogoController.Produtos`](legacy/src/Budgets.Legacy.Api/Controllers/CatalogoController.cs) (`ILIKE '%termo%'`) · nova: índices e analisadores em [`indices.ts`](apps/api/src/search/indices.ts), consultas em [`search.service.ts`](apps/api/src/search/search.service.ts), indexação em [`elastic-indexer.ts`](apps/api/src/search/elastic-indexer.ts), outbox e relay em [`relay.ts`](apps/api/src/worker/relay.ts), worker em [`worker.ts`](apps/api/src/worker/worker.ts); testes em [`search.test.ts`](apps/api/src/search/search.test.ts) (cada caso compara com o `ILIKE` da legada) e [`worker.test.ts`](apps/api/src/worker/worker.test.ts)
+- **Onde ver:** legada: [`OrcamentosController.Listar`](legacy/src/Budgets.Legacy.Api/Controllers/OrcamentosController.cs) e [`CatalogoController.Produtos`](legacy/src/Budgets.Legacy.Api/Controllers/CatalogoController.cs) (`ILIKE '%termo%'`) · nova: índices e analisadores em [`indices.ts`](apps/api/src/search/indices.ts), consultas em [`search.service.ts`](apps/api/src/search/search.service.ts), indexação em [`elastic-indexer.ts`](apps/api/src/search/elastic-indexer.ts), outbox e relay em [`relay.ts`](apps/api/src/worker/relay.ts), worker em [`worker.ts`](apps/api/src/worker/worker.ts); testes em [`search.test.ts`](apps/api/src/search/search.test.ts) (cada caso compara com o `ILIKE` da legada) e [`worker.test.ts`](apps/api/src/worker/worker.test.ts) · decisões: [ADR 0006](docs/adr/0006-outbox-e-fila.md) (outbox e fila) e [ADR 0007](docs/adr/0007-elasticsearch-com-reserva.md) (Elasticsearch com reserva)
 
 ---
 
@@ -334,28 +347,35 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 | Implementações da regra de cálculo | 2 | 1 |
 | Testes do pacote de dinheiro | 0 | 38 (com testes de propriedade contra `BigInt`), 100% das linhas |
 
-- **Trade-offs:** ⟨Trocar o “sempre para cima” por uma regra padrão muda os totais em alguns centavos em relação ao sistema antigo; a mudança precisa ser comunicada ao cliente, que tinha aprovado o paliativo.⟩
+- **Trade-offs:** Trocar o “sempre para cima” por uma regra padrão muda os totais em alguns centavos em relação ao sistema antigo; a mudança precisa ser comunicada ao cliente, que tinha aprovado o paliativo.
 - **Onde ver:** [`packages/money`](packages/money/src) · [ADR 0001](docs/adr/0001-dinheiro-em-inteiros.md) · [ADR 0002](docs/adr/0002-pacote-proprio-de-dinheiro.md) · cálculo da legada, com o paliativo: [`CalculoLegado.cs`](legacy/src/Budgets.Legacy.Data/CalculoLegado.cs)
 
 ---
 
 ### 5. Orçamento dentro de orçamento (1 nível)
 
-- **Problema:** ⟨Um orçamento podia conter outros, com profundidade máxima de 1; o total dos filhos entrava no cálculo do pai.⟩
-- **Impacto:** ⟨…⟩
+- **Problema:** Um orçamento pode conter outros (uma versão nova contendo a anterior, por exemplo), com profundidade máxima de 1, e o total de cada filho, com o prazo e a margem dele, entra no total do pai. Na legada, salvar recalcula só aquele orçamento, usando os totais **guardados** dos filhos.
+- **Impacto:** Salvar um filho não atualiza o pai: o total do pai fica defasado até alguém salvar o pai de novo (reproduzido no código da legada, [`OrcamentosController.Salvar`](legacy/src/Budgets.Legacy.Api/Controllers/OrcamentosController.cs)).
 - **Solução:**
-  - ⟨`Budget.parentId`; validação no servidor (422): filho não tem filhos, quem tem filhos não vira filho⟩
-  - ⟨Total do pai = (subtotais + total atual de cada filho) × prazo × margem⟩
-  - ⟨Editar um filho invalida o cache do pai⟩
+  - Regra em `packages/budget-calc`: filho não tem filhos (`validateNesting`; `calcBudget` recusa neto); total do pai = (subtotais dos grupos + total atual de cada filho) → prazo → margem.
+  - O salvar de um filho recalcula o pai **na mesma transação** e avisa a busca dos dois (outbox).
+  - O cache do detalhe usa a hora da última gravação na chave: quando o pai é recalculado, a chave muda sozinha.
 
-- **Resultado:** ⟨…⟩
-- **Onde ver:** regra em [`packages/budget-calc`](packages/budget-calc/src/nesting.ts) (`validateNesting`, e `calcBudget` recusa neto) · ⟨uso na API: `apps/api/…`⟩
+- **Resultado:**
+
+| Métrica | Antes | Depois |
+|---|---|---|
+| Total do pai depois de salvar um filho | o antigo, até o pai ser salvo | atualizado na mesma transação (teste automatizado) |
+| Onde a regra de profundidade é conferida | — (não reproduzida na legada) | no cálculo, que recusa neto |
+
+- **Trade-offs:** Salvar um filho grava também o pai (mais uma linha e um aviso no outbox). Vincular e desvincular orçamentos pela tela não foi implementado na versão nova: os vínculos vêm dos dados.
+- **Onde ver:** regra em [`packages/budget-calc`](packages/budget-calc/src/nesting.ts) (`validateNesting`, e `calcBudget` recusa neto) · na API: o recálculo do pai em [`draft-saver.ts`](apps/api/src/drafts/draft-saver.ts) e o teste “salvar um orçamento que está dentro de outro atualiza o total do pai” em [`drafts.test.ts`](apps/api/src/drafts/drafts.test.ts)
 
 ---
 
 ### 6. Rápido em dev, lento em produção
 
-- **Problema:** ⟨Em desenvolvimento a velocidade era aceitável; na VPS Contabo em US Central, com usuários no Brasil, ficava muito lento.⟩
+- **Problema:** Em desenvolvimento a velocidade era aceitável; na VPS Contabo em US Central, com usuários no Brasil, ficava muito lento.
 - **Impacto:** Em desenvolvimento, tudo roda na mesma máquina e cada ida ao servidor custa ~1 ms; o custo de muitas idas e de payloads grandes não aparece. Na produção, cada ida atravessa a rede, e uma arquitetura que faz muitas idas fica lenta sem que nada no código tenha mudado.
 - **Solução:**
   - Um ambiente que emula a VPS ([`compose.vps.yaml`](compose.vps.yaml)): CPU e memória limitadas e a rede até o usuário injetada pelo Toxiproxy; as duas versões medidas nele do mesmo jeito.
@@ -368,13 +388,14 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 | Legada | ~320 ms | ~1.136 ms | 3,5x: 16 idas ao servidor e 152 KB de upload |
 | Nova | ~19 ms | ~170 ms | 1 ida |
 
+- **Trade-offs:** O ambiente emulado não é a VPS: a rede é suposta e a máquina é outra. Ele serve para comparar as duas versões do mesmo jeito, não para prever os números exatos de produção. E é mais uma configuração para manter em dia junto com o código.
 - **Onde ver:** [`compose.vps.yaml`](compose.vps.yaml) · [`bench/vps/rede.sh`](bench/vps/rede.sh) · [`bench/k6/`](bench/k6/) · a tabela completa em [Antiga × nova](#antiga--nova-números)
 
 ---
 
 ### 7. Tela complexa acoplada ao cálculo
 
-- **Problema:** ⟨Inserir produto acima/abaixo de uma linha, reordenar, editar quantidade e desconto, tudo em jQuery manipulando o DOM e recalculando. Na época, eu já defendia uma SPA (ex.: React): cálculos, status e taxas precisavam ser dinâmicos, e o modelo de páginas com jQuery não acompanhava isso.⟩
+- **Problema:** Inserir produto acima ou abaixo de uma linha, reordenar e editar quantidade e desconto eram feitos em jQuery, manipulando o DOM e recalculando o orçamento na própria página.
 - **Impacto:** A tela era, ao mesmo tempo, a interface e a calculadora: cada edição em jQuery mexia no DOM e chamava um recálculo que **lia os valores de volta do texto da página** (“R$ 1.234,56”), em float, com o arredondamento para cima. O total mostrado era uma prévia que podia não bater com o que o servidor gravava.
 - **Solução:**
   - A tela (React) **não calcula nada**: cada edição vira uma operação no rascunho, e a tela mostra os totais que a API devolveu (calculados pelo mesmo `budget-calc` do salvar).
@@ -388,11 +409,11 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 |---|---|---|
 | Onde o total da tela é calculado | no navegador, lendo o texto do DOM (float + arredondamento para cima) | na API; a tela só exibe |
 | Tela × salvo | prévia R$ 50.348.384,78, salvo R$ 50.348.384,65 | iguais: R$ 39.621.923,94 na tela antes de salvar, depois de salvar e no banco |
-| Quantidade inválida para a unidade | ⟨não reproduzido na legada⟩ | marcada no campo, nada enviado |
+| Quantidade inválida para a unidade | aceita: o campo usa 2 casas para qualquer unidade (“1,5 un” passava) | marcada no campo, nada enviado |
 | Mover um item | DOM, e o orçamento inteiro reenviado ao salvar | 1 operação no rascunho |
 
-- **Trade-offs:** Cada edição é uma ida ao servidor (~9 ms localmente, medido na etapa 5); sem atualização otimista, de propósito: mostrar um valor calculado no navegador antes da resposta recriaria a prévia que diverge do salvo. O efeito com a rede da VPS é medido na etapa 9.
-- **Onde ver:** legada: `recalcular()` em [`orcamento.js`](legacy/src/Budgets.Legacy.Web/wwwroot/js/orcamento.js) · nova: [`GroupCard.tsx`](apps/web/src/components/GroupCard.tsx) (linhas editáveis, inserir, arrastar), [`Field.tsx`](apps/web/src/components/Field.tsx) (grava ao sair, valida com `packages/money`), [`draft.ts`](apps/web/src/api/draft.ts) (operações, ordem das respostas, abas)
+- **Trade-offs:** Cada edição é uma ida ao servidor: ~9 ms na máquina local e ~157 ms com a rede da VPS emulada (ver [Antiga × nova](#antiga--nova-números)). Sem atualização otimista, de propósito: mostrar um valor calculado no navegador antes da resposta recriaria a prévia que diverge do salvo.
+- **Onde ver:** legada: `recalcular()` em [`orcamento.js`](legacy/src/Budgets.Legacy.Web/wwwroot/js/orcamento.js) · nova: [`GroupCard.tsx`](apps/web/src/components/GroupCard.tsx) (linhas editáveis, inserir, arrastar), [`Field.tsx`](apps/web/src/components/Field.tsx) (grava ao sair, valida com `packages/money`), [`draft.ts`](apps/web/src/api/draft.ts) (operações, ordem das respostas, abas) · decisão: [ADR 0008](docs/adr/0008-tela-sem-calculo.md)
 
 ---
 
@@ -411,9 +432,10 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 | Métrica | Antes | Depois |
 |---|---|---|
 | Testes da regra de cálculo | 0 | 58 (dinheiro + orçamento), 100% das linhas |
-| Cobertura de linhas pelo Vitest | — | `money` e `budget-calc` 100% · API 85% · tela 29% (as páginas são cobertas pelo Playwright, fora desta medição) |
+| Cobertura de linhas pelo Vitest | nenhum teste no front | `money` e `budget-calc` 100% · API 85% · tela 29% (as páginas são cobertas pelo Playwright, fora desta medição) |
 | Testes automatizados | 0 no front | 147 (Vitest: 134 em Node, 13 na tela) + 3 no navegador (Playwright) + 22 na legada |
 
+- **Trade-offs:** Os testes de integração sobem Postgres, Redis e Elasticsearch de verdade (Testcontainers), o que é mais lento que simular com mocks e exige Docker no CI, em troca de testar o que roda em produção. A cobertura da tela pelo Vitest é baixa (29%): as páginas dependem dos testes no navegador, que são poucos (3).
 - **Onde ver:** [`packages/money`](packages/money/src) · [`packages/budget-calc`](packages/budget-calc/src) · casos compartilhados com a legada em [`fixtures/budget-cases.json`](fixtures/budget-cases.json)
 
 ---
@@ -427,7 +449,7 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
   - **Cache por tipo de arquivo:** arquivos com hash ficam em cache por um ano (`immutable`, nem revalidam); o `index.html` e o `version.json` sempre revalidam (`no-cache`): são eles que apontam para os nomes novos.
   - **Aviso de versão nova:** o build publica um `version.json` (commit e hora); a tela consulta ao voltar para a aba e a cada 5 minutos e, se mudou, mostra “Uma versão nova do sistema foi publicada · Recarregar”. Recarregar é seguro: as alterações não salvas estão no rascunho, no servidor.
   - **Contratos compartilhados:** os tipos da API ficam em `packages/contracts`; uma mudança incompatível quebra o build, não o usuário.
-  - ⟨**Deploy compatível:** mudanças na API aditivas primeiro e remoções depois, para a versão anterior da tela continuar funcionando durante a transição (regra de processo, ainda não exercitada)⟩
+  - **Deploy compatível** (regra de processo, não exercitada aqui): mudanças na API aditivas primeiro e remoções depois, para a versão anterior da tela continuar funcionando durante a transição.
 
 - **Resultado:**
 
@@ -435,11 +457,11 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 |---|---|---|
 | Ctrl+F5 necessário após deploy | sim, recorrente | não (conferido: deploy da versão B com a aba aberta na A; aviso ao voltar para a aba; “Recarregar” trouxe o JS novo) |
 | Cache do JS | 7 dias, sem versão no nome | 1 ano, com o hash no nome (o nome muda a cada versão) |
-| Cache do `index.html` | — | `no-cache`: sempre revalida |
+| Cache do `index.html` | não se aplica (HTML gerado pelo servidor a cada visita) | `no-cache`: sempre revalida |
 | Erros depois do deploy | só quando o usuário reclamava | no Sentry, com a versão do build em cada erro: dá para ver “começou na versão X” (conferido com o GlitchTip local; a contagem real depende de usuários reais) |
 
-- **Trade-offs:** Uma SPA separa front e back em dois artefatos, o que **aumenta** o risco de descompasso de versões se nada for feito; a mitigação precisa existir desde o primeiro deploy. O aviso depende de o usuário clicar: uma aba esquecida aberta continua na versão antiga até lá (ela só não quebra se a API se mantiver compatível). Os cabeçalhos de cache estão no `vite preview`; na etapa 9, o nginx da “VPS” repete as mesmas regras.
-- **Onde ver:** legada: [`Program.cs` do front](legacy/src/Budgets.Legacy.Web/Program.cs) (scripts com cache de 7 dias) e a tag do script em [`Orcamento.cshtml`](legacy/src/Budgets.Legacy.Web/Pages/Orcamento.cshtml), sem versão no nome. O próprio ASP.NET já oferecia a correção (`asp-append-version`), que o sistema não usava · nova: [`vite.config.ts`](apps/web/vite.config.ts) (versão, `version.json` e cabeçalhos), [`version.ts`](apps/web/src/version.ts) e [`NewVersion.tsx`](apps/web/src/components/NewVersion.tsx); testes em [`editar.spec.ts`](apps/web/e2e/editar.spec.ts) (cabeçalhos no navegador) e [`NewVersion.test.tsx`](apps/web/src/components/NewVersion.test.tsx)
+- **Trade-offs:** Uma SPA separa front e back em dois artefatos, o que **aumenta** o risco de descompasso de versões se nada for feito; a mitigação precisa existir desde o primeiro deploy. O aviso depende de o usuário clicar: uma aba esquecida aberta continua na versão antiga até lá (ela só não quebra se a API se mantiver compatível). As mesmas regras de cache valem no `vite preview` e no nginx do ambiente “VPS” ([`nginx.conf`](infra/web/nginx.conf)).
+- **Onde ver:** legada: [`Program.cs` do front](legacy/src/Budgets.Legacy.Web/Program.cs) (scripts com cache de 7 dias) e a tag do script em [`Orcamento.cshtml`](legacy/src/Budgets.Legacy.Web/Pages/Orcamento.cshtml), sem versão no nome. O próprio ASP.NET já oferecia a correção (`asp-append-version`), que o sistema não usava · nova: [`vite.config.ts`](apps/web/vite.config.ts) (versão, `version.json` e cabeçalhos), [`version.ts`](apps/web/src/version.ts) e [`NewVersion.tsx`](apps/web/src/components/NewVersion.tsx); testes em [`editar.spec.ts`](apps/web/e2e/editar.spec.ts) (cabeçalhos no navegador) e [`NewVersion.test.tsx`](apps/web/src/components/NewVersion.test.tsx) · rastreamento de erros e métricas: [ADR 0009](docs/adr/0009-observabilidade.md)
 
 ---
 
@@ -458,11 +480,11 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 
 | Métrica | Antes | Depois |
 |---|---|---|
-| Edições perdidas com 10 edições simultâneas no mesmo rascunho (teste automatizado) | — | 0 |
-| Alterações perdidas por causa do bloqueio | — | 0 (o bloqueio dura enquanto existe o rascunho) |
-| Conflitos detectados e recarregados | — | — |
+| Edições perdidas com 10 edições simultâneas no mesmo rascunho (teste automatizado) | não medido; pelo desenho, cada aba guarda a própria cópia e a última a salvar sobrescreve a outra | 0 |
+| Alterações perdidas por causa do bloqueio | não medido; o bloqueio expirava sozinho mesmo com a edição em andamento | 0 (o bloqueio dura enquanto existe o rascunho) |
+| Gravação fora do rascunho detectada ao salvar | nenhuma detecção | 409 com os grupos em conflito, sem gravar nada (teste automatizado) |
 
-- **Trade-offs:** ⟨O bloqueio por orçamento impede dois usuários de trabalharem em paralelo no mesmo orçamento; foi mantido porque é a regra de negócio conhecida pelos usuários. Um rascunho esquecido segura o bloqueio por até 30 minutos.⟩
+- **Trade-offs:** O bloqueio por orçamento impede dois usuários de trabalharem em paralelo no mesmo orçamento; foi mantido porque é a regra de negócio conhecida pelos usuários. Um rascunho esquecido segura o bloqueio por até 30 minutos.
 - **Onde ver:** legada: [`OrcamentosController.Abrir`](legacy/src/Budgets.Legacy.Api/Controllers/OrcamentosController.cs) (marcação “aberto” que expira em 30 min). Ao reproduzir, apareceu uma corrida: o “liberar” enviado pela página que sai (F5, outra aba) podia chegar depois da nova abertura e soltar o bloqueio dela; o “liberar” passou a levar o instante da abertura e só vale para ela · nova: o rascunho é o bloqueio, uma chave só com `SET NX` e TTL, em [`draft.store.ts`](apps/api/src/drafts/draft.store.ts); não há “liberar” para chegar atrasado
 
 ---
@@ -474,18 +496,17 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 - **Solução:**
   - O rascunho guarda **só o que mudou** (o *changeset*): itens alterados, criados e removidos, e campos do cabeçalho.
   - “Salvar alterações” aplica o changeset numa transação: grava as linhas alteradas e os subtotais dos grupos afetados, sem tocar no resto do orçamento.
-  - ⟨Experimento opcional e medido: persistir o changeset por fila (*write-behind*) em vez de na própria requisição⟩
 
 - **Resultado:**
 
 | Métrica | Antes | Depois |
 |---|---|---|
 | Salvar 1 alteração no pior caso real (15 grupos, 1.000 itens) · rede local | 177 KB enviados, ~320 ms, 1.000 itens apagados e regravados | 0 B enviados (o changeset já está no servidor), ~19 ms, 1 item e 1 grupo gravados |
-| Salvar 1 alteração no perfil de estresse (5.000 itens, acima do real) · rede local | 878 KB enviados, ~1,8 s, 5.000 itens apagados e regravados | — |
+| Salvar 1 alteração no perfil de estresse (5.000 itens, acima do real) · rede local | 878 KB enviados, ~1,8 s, 5.000 itens apagados e regravados | não medido; o custo do salvar depende do que mudou, não do tamanho do orçamento |
 | Payload por edição | o orçamento inteiro, a cada salvamento | ~60 B por edição, para o rascunho |
 | Rascunho guardado depois de 1 alteração | página + `localStorage` | 555 B no `redis-data` |
 
-- **Trade-offs:** ⟨Um salvamento com muitas alterações ainda grava muitas linhas, mas o custo passa a ser proporcional ao que mudou, não ao tamanho do orçamento.⟩
+- **Trade-offs:** Um salvamento com muitas alterações ainda grava muitas linhas, mas o custo passa a ser proporcional ao que mudou, não ao tamanho do orçamento.
 - **Onde ver:** legada: [`OrcamentosController.Salvar`](legacy/src/Budgets.Legacy.Api/Controllers/OrcamentosController.cs) (apaga e regrava tudo numa transação) · nova: [`draft-saver.ts`](apps/api/src/drafts/draft-saver.ts) (grava só o changeset; confere a versão dos grupos e recalcula os subtotais pelo banco). Medido com `curl` na mesma máquina, mediana de 7 rodadas
 
 ---
@@ -508,7 +529,7 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 | Simulações gravadas sem o usuário pedir | a cada 5 min | nenhuma |
 | Salvamentos por sessão de edição | 1 a cada 5 min + manuais | só os manuais |
 
-- **Trade-offs:** ⟨Um rascunho abandonado expira em 30 minutos: é uma rede de segurança para imprevistos, não um lugar para guardar trabalho por dias. Em troca, o `redis-data` guarda dados do usuário e precisa de AOF e de monitoramento de memória.⟩
+- **Trade-offs:** Um rascunho abandonado expira em 30 minutos: é uma rede de segurança para imprevistos, não um lugar para guardar trabalho por dias. Em troca, o `redis-data` guarda dados do usuário e precisa de AOF e de monitoramento de memória.
 - **Onde ver:** legada: salvamento automático e `salvar()` em [`orcamento.js`](legacy/src/Budgets.Legacy.Web/wwwroot/js/orcamento.js). Reproduzido: uma quantidade editada de 4 para 9, sem salvar, volta a 4 depois que a página cai · nova: [`drafts.service.ts`](apps/api/src/drafts/drafts.service.ts) (abrir, editar, salvar, descartar); o teste [`durability.test.ts`](apps/api/src/drafts/durability.test.ts) reinicia o Redis no meio da edição e o rascunho continua lá (e falha se o AOF for desligado)
 
 ---
@@ -525,12 +546,12 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 | Métrica | Antes | Depois |
 |---|---|---|
 | Servidores por chamada | 2 | 1 |
-| Carregar um grupo de 63 itens (rede local) | 21 ms, dos quais 8 ms só no salto front → API | — |
+| Carregar um grupo de 63 itens (rede local) | 21 ms, dos quais 8 ms só no salto front → API | ~5 ms, só a API, sem salto (medido na máquina local) |
 | Serializações por chamada | 2 | 1 |
 | Lugares que definem cada endpoint | 2 | 1 |
 | Tempo de uma edição (ambiente “VPS”) | salvar: 1.136 ms (39 requisições por rodada, cada uma por front e API) | 170 ms (10 requisições por rodada, direto na API) |
 
-- **Trade-offs:** ⟨Com o front como aplicação estática, a API precisa cuidar de CORS e de autenticação diretamente.⟩
+- **Trade-offs:** A tela e a API ficam atrás do mesmo endereço (nginx; o Vite em desenvolvimento), o que dispensa CORS. Em domínios separados, a API teria de liberar a origem da tela; e a autenticação, aqui simulada, passaria a ser responsabilidade da API sozinha.
 - **Onde ver:** legada: [`Intermediario.cs`](legacy/src/Budgets.Legacy.Web/Intermediario.cs) (endpoints `/front/...` que repassam à API) e os DTOs duplicados em [`Modelos.cs`](legacy/src/Budgets.Legacy.Web/Modelos.cs). O cabeçalho `Server-Timing` mostra no DevTools o tempo de cada salto · nova: contratos com validação em [`packages/contracts`](packages/contracts/src/index.ts), usados direto nos controllers ([`budgets.controller.ts`](apps/api/src/budgets/budgets.controller.ts))
 
 ---
@@ -617,6 +638,19 @@ pnpm --filter @budgets/api generate   # client do Prisma (gerado, fora do git)
 pnpm test
 ```
 
+Para ver as duas versões funcionando, com os mesmos dados, cada servidor num terminal:
+
+```bash
+pnpm legacy:seed full && pnpm v2:seed full   # carrega os dois bancos (e a busca)
+pnpm legacy:api      # legada, back:  http://127.0.0.1:5080
+pnpm legacy:web      # legada, tela:  http://127.0.0.1:5081
+pnpm v2:api          # nova, API:     http://127.0.0.1:3000/api
+pnpm v2:worker       # nova, worker (outbox → fila → busca)
+pnpm v2:web          # nova, tela:    http://127.0.0.1:5173
+```
+
+Nas duas telas, escolha um usuário e abra um orçamento; com outro usuário numa janela anônima, dá para ver o bloqueio de edição. O ambiente que emula a VPS e o benchmark estão em [Como medimos](#como-medimos).
+
 | Comando | O que faz |
 |---|---|
 | `pnpm infra:up` / `infra:down` | Sobe ou para os serviços, mantendo os dados |
@@ -666,20 +700,20 @@ docs/adr/             decisões de arquitetura
 
 ## Como este projeto foi feito
 
-**Processo.** Todo o trabalho entra por pull request, com descrição e checklist, e passa pela CI (lint, tipos e testes) antes de ir para a `main`. Cada decisão relevante tem um ADR curto em [`docs/adr/`](docs/adr/).
+**Processo.** Todo o trabalho entrou por pull request (22 no total), com descrição, o que foi medido e o que foi encontrado no caminho, e só vai para a `main` com os quatro checks da CI verdes: lint, tipos e testes; a versão legada (.NET); a tela num navegador de verdade (Playwright); e a detecção de segredos. Cada decisão que alguém poderia questionar tem um ADR curto em [`docs/adr/`](docs/adr/).
 
 **Uso de IA.** Usei IA (Claude Code) como ferramenta ao longo do projeto, com as decisões sob minha responsabilidade:
 - **Orquestrei** o trabalho: defini o problema a partir da minha experiência no sistema original, o escopo, o que conta como pronto e a ordem das etapas.
 - **Estudei as decisões** antes de adotá-las: dinheiro em inteiros (centavos e pontos-base) no lugar de float e decimal; arredondamento comercial no lugar do “sempre para cima” do sistema antigo; bloqueio de edição com expiração no lugar da marcação no banco; cálculo por delta no servidor.
 - **Comparei trade-offs** entre alternativas: *write-through* × *write-behind*; React + Vite × Next.js × HTMX; reproduzir a versão legada em ASP.NET Core × em Node; cache do TanStack Query × `localStorage`.
 - **Pesquisei soluções alternativas**: biblioteca pronta de dinheiro (Dinero.js) × pacote próprio; emular a VPS localmente (Toxiproxy, `tc netem`) × medir numa VPS real; bloqueio exclusivo por orçamento × edição simultânea com conflitos por grupo.
-- **Validei os métodos**: conferi o protótipo contra o comportamento real do sistema antigo e corrigi suposições erradas (onde ficava o arredondamento para cima, como funcionava o bloqueio de edição, o salvamento do orçamento inteiro); separei o que é medido do que é simulado; ⟨testes automatizados, benchmark e revisão do código, a completar ao longo do projeto⟩.
+- **Validei os métodos**: conferi o protótipo contra o comportamento real do sistema antigo e corrigi suposições erradas (onde ficava o arredondamento para cima, como funcionava o bloqueio de edição, o salvamento do orçamento inteiro); separei o que é medido do que é simulado (a rede da VPS é suposição, e está escrito); quebrei de propósito as partes críticas (o delta, o AOF do Redis, a remoção de acentos, a numeração do outbox) para provar que algum teste falha; medi as duas versões no mesmo ambiente e do mesmo jeito, inclusive onde a nova perde (abrir o orçamento); e registrei nos pull requests os erros que eu mesmo cometi no caminho e como foram achados.
 
 ---
 
 ## Status
 
-**Pronto =** as duas versões funcionando, com os 14 problemas reproduzidos na legada e resolvidos na nova, medidos e documentados.
+**Pronto.** As duas versões funcionam, com os 14 problemas reproduzidos na legada e resolvidos na nova, medidos e documentados. O que ficou de fora está listado no fim desta seção.
 
 - [x] Protótipo visual (`prototype/index.html`)
 - [x] Repositório, CI e convenções
@@ -702,4 +736,11 @@ docs/adr/             decisões de arquitetura
 - [x] Ambiente “VPS” (4 CPUs, 8 GB, rede emulada) e benchmark com k6 das duas versões
 - [x] Rastreamento de erros: Sentry na API, no worker e na tela (GlitchTip local), ligados pelo `request_id`
 - [x] Métricas: Prometheus coletando a API e o worker, 11 regras de alerta e painel no Grafana
-- [ ] README preenchido com os números
+- [x] README com os números medidos, o comparativo lado a lado e o monitoramento em GIF
+
+**Fora do escopo, ou próximos passos:**
+- Vincular e desvincular orçamentos pela tela (a regra e o recálculo do pai existem; os vínculos vêm dos dados), renomear grupo e mover item entre grupos.
+- Autenticação de verdade (o login é simulado nas duas versões).
+- Medir numa VPS real: a rede de 150 ms é uma suposição; nada aqui substitui uma medição com usuários reais.
+- Source maps no Sentry (os erros da tela chegam com o código minificado), Alertmanager para enviar os alertas, e compressão (gzip) nas respostas.
+- Busca com sinônimos (“CFTV” → câmera) e o relay do outbox por `LISTEN/NOTIFY` em vez de consulta periódica.
