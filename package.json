@@ -19,7 +19,10 @@
     "infra:ps": "docker compose ps",
     "redis:cache": "docker compose exec redis-cache redis-cli",
     "redis:data": "docker compose exec redis-data redis-cli",
-    "seed:generate": "pnpm --filter @budgets/seed generate"
+    "seed:generate": "pnpm --filter @budgets/seed generate",
+    "legacy:seed": "set -a && . ./.env && set +a && dotnet run --project legacy/src/Budgets.Legacy.Seed -c Release --",
+    "legacy:test": "dotnet test legacy/Budgets.Legacy.sln",
+    "legacy:format": "dotnet format legacy/Budgets.Legacy.sln"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

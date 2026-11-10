@@ -34,6 +34,28 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test:coverage
 
+  legacy:
+    name: Legada (.NET)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # O teste de integração carrega os dados do gerador (TypeScript): o contrato entre as versões.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm seed:generate -- --profile small
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: legacy/global.json
+      - run: dotnet format legacy/Budgets.Legacy.sln --verify-no-changes
+      # Testcontainers sobe um Postgres descartável no Docker do runner.
+      - run: dotnet test legacy/Budgets.Legacy.sln
+
   secrets:
     name: Detecção de segredos
     runs-on: ubuntu-latest
