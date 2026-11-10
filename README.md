@@ -51,7 +51,7 @@
 |---|---|
 | **Produto** | Sistema de orçamentos: listagem com filtros; orçamento com cabeçalho (cliente, vendedor, status, ajuste de prazo %, margem %), grupos personalizáveis e produtos com busca, quantidade, desconto por item e ordenação |
 | **Escala** | Orçamentos com ⟨milhares⟩ de produtos; orçamentos podem conter outros orçamentos (1 nível) |
-| **Stack original** | C# · Razor Pages · jQuery · JavaScript · `localStorage` · PostgreSQL + Entity Framework |
+| **Stack original** | C# · Razor Pages (front) + API ASP.NET (back), em projetos separados · jQuery · JavaScript · `localStorage` · PostgreSQL + Entity Framework |
 | **Infra original** | VPS Contabo, US Central; usuários no Brasil |
 | **Meu papel** | Engenheiro de software, único desenvolvedor do sistema |
 
@@ -100,6 +100,7 @@ As duas versões implementam as mesmas regras; só muda **como**.
 | 10 | Orçamento marcado como "aberto" no banco para bloquear outros usuários; o mesmo usuário em várias abas ficava com estados divergentes | Abas desatualizadas salvando por cima uma da outra | Rascunho único por usuário no servidor, compartilhado pelas abas; bloqueio com expiração preso ao rascunho | Redis · TanStack Query | — |
 | 11 | Salvar enviava o orçamento **inteiro** (ex.: 12 grupos e 500+ produtos para mudar um) | Salvamentos lentos e transações enormes para mudanças pequenas | Salvar grava só o *changeset* do rascunho, numa transação | NestJS · Postgres · Redis | — |
 | 12 | Edições só na página e no `localStorage` até salvar; para não perder trabalho, salvamento automático a cada 5 minutos | Queda de energia ou navegador fechado perdia o progresso; o salvamento automático gravava simulações indesejadas | Rascunho no servidor (Redis) e botão “Salvar alterações”; sem salvamento automático | Redis · NestJS | — |
+| 13 | O jQuery chamava o front (Razor), que chamava a API do back, e a resposta fazia o caminho de volta | Cada chamada atravessava dois servidores e duas serializações; endpoints e DTOs duplicados nos dois projetos | O navegador chama uma API só, com contratos compartilhados em TypeScript | NestJS · `packages/contracts` | — |
 
 ### Por que trocar de stack?
 
@@ -258,12 +259,12 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 | Métrica | Antes | Depois |
 |---|---|---|
 | Divergência tela × banco (orçamento de 5.000 itens) | — | R$ 0,00 |
-| Valor cobrado a mais pelo arredondamento para cima | — | R$ 0,00 (paliativo removido) |
+| Valor cobrado a mais pelo arredondamento para cima (base de exemplo, 3.201 orçamentos) | R$ 988,32 no total, em 3.164 orçamentos; até R$ 8,59 num só | R$ 0,00 (paliativo removido) |
 | Implementações da regra de cálculo | 2 | 1 |
 | Testes do pacote de dinheiro | 0 | 38 (com testes de propriedade contra `BigInt`), 100% das linhas |
 
 - **Trade-offs:** ⟨Trocar o “sempre para cima” por uma regra padrão muda os totais em alguns centavos em relação ao sistema antigo; a mudança precisa ser comunicada ao cliente, que tinha aprovado o paliativo.⟩
-- **Onde ver:** [`packages/money`](packages/money/src) · [ADR 0001](docs/adr/0001-dinheiro-em-inteiros.md) · [ADR 0002](docs/adr/0002-pacote-proprio-de-dinheiro.md)
+- **Onde ver:** [`packages/money`](packages/money/src) · [ADR 0001](docs/adr/0001-dinheiro-em-inteiros.md) · [ADR 0002](docs/adr/0002-pacote-proprio-de-dinheiro.md) · cálculo da legada, com o paliativo: [`CalculoLegado.cs`](legacy/src/Budgets.Legacy.Data/CalculoLegado.cs)
 
 ---
 
@@ -357,7 +358,7 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 - **Impacto:** Abas desatualizadas e descompassadas; alterações de uma aba se perdiam ou sobrescreviam as de outra.
 - **Solução:**
   - O estado da edição sai do navegador e vai para um **rascunho único por usuário no servidor** ([ADR 0004](docs/adr/0004-rascunho-de-edicao-no-redis.md)). Todas as abas editam o mesmo rascunho, então não há mais duas versões para divergir.
-  - **O rascunho segura o bloqueio:** a marcação “aberto” no banco vira um bloqueio no Redis (`SET NX` com TTL) que expira junto com o rascunho, 30 minutos após a última edição. Fechar o navegador não deixa mais o orçamento travado para sempre.
+  - **O rascunho segura o bloqueio:** a marcação “aberto” no banco, que já expirava sozinha, vira um bloqueio no Redis (`SET NX` com TTL) ligado ao **rascunho**, e não à tela: expira junto com ele, 30 minutos após a última edição. Enquanto houver alterações não salvas, ninguém mais edita; sem rascunho, o orçamento fica livre.
   - ⟨**Versão por grupo no rascunho:** cada edição envia a versão do grupo que a aba viu; uma aba com versão velha recebe 409 e recarrega o grupo, sem sobrescrever a outra⟩
   - ⟨**Abas atualizadas:** após cada edição, as outras abas recebem o aviso (`BroadcastChannel`) e recarregam do rascunho⟩
 
@@ -366,7 +367,7 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 | Métrica | Antes | Depois |
 |---|---|---|
 | Edições perdidas entre abas (teste automatizado) | — | 0 |
-| Bloqueios “presos” após fechar o navegador | — | 0 (expiram em 30 min) |
+| Alterações perdidas por causa do bloqueio | — | 0 (o bloqueio dura enquanto existe o rascunho) |
 | Conflitos detectados e recarregados | — | — |
 
 - **Trade-offs:** ⟨O bloqueio por orçamento impede dois usuários de trabalharem em paralelo no mesmo orçamento; foi mantido porque é a regra de negócio conhecida pelos usuários. Um rascunho esquecido segura o bloqueio por até 30 minutos.⟩
@@ -419,6 +420,27 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 
 ---
 
+### 13. Um intermediário desnecessário entre o navegador e a API
+
+- **Problema:** O front (Razor Pages) e o back (API em C#) eram projetos separados, mas o navegador não falava com a API: o jQuery chamava um endpoint do **front**, que chamava a **API**, que respondia ao front, que respondia ao jQuery.
+- **Impacto:** Cada chamada atravessava dois servidores, com duas serializações e desserializações. Os endpoints e os DTOs existiam em dobro, um no front e um no back, e qualquer mudança precisava ser feita nos dois. Eram dois pontos de falha e dois lugares para procurar um erro.
+- **Solução:**
+  - O navegador chama **uma API só** (NestJS); o front é uma aplicação estática (React + Vite).
+  - Os contratos (tipos e validação) ficam em `packages/contracts`, usados pela API e pela tela: um só lugar para mudar.
+- **Resultado:**
+
+| Métrica | Antes | Depois |
+|---|---|---|
+| Servidores por chamada | 2 | 1 |
+| Serializações por chamada | 2 | 1 |
+| Lugares que definem cada endpoint | 2 | 1 |
+| Tempo de uma edição (ambiente “VPS”) | — | — |
+
+- **Trade-offs:** ⟨Com o front como aplicação estática, a API precisa cuidar de CORS e de autenticação diretamente.⟩
+- **Onde ver:** ⟨…⟩
+
+---
+
 ## Como medimos
 
 | | |
@@ -427,7 +449,7 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 | **Calibração** | ⟨RTT medido de verdade do Brasil até uma VPS em US Central: X ms; CPU calibrada com benchmark⟩ |
 | **Carga** | ⟨k6, N usuários virtuais, cenários em `bench/`⟩ |
 | **Dados** | Gerador determinístico ([`packages/seed`](packages/seed/src/generate.ts)), semente fixa: 3.200 orçamentos e 426 mil itens; 5.500 produtos (un, m, L, kg); 2.200 clientes; 60% pequenos (até 60 itens), 30% médios (até 300), 9,5% grandes (12 grupos, 300 a 800 itens), 16 no pior caso real (15 grupos, 1.000 itens) e 1 de estresse sintético (5.000 itens, acima do real); 40% contêm uma versão anterior. Um teste trava o hash da saída |
-| **Legada** | Versão simplificada em ASP.NET Core Razor Pages + jQuery (`legacy/`), na stack original, reproduzindo os 12 problemas, contra o mesmo Postgres e os mesmos dados |
+| **Legada** | Versão simplificada em ASP.NET Core Razor Pages + jQuery (`legacy/`), na stack original, reproduzindo os 13 problemas, contra o mesmo Postgres e os mesmos dados |
 | **O que não está aqui** | ⟨limitações conhecidas da medição⟩ |
 
 Reproduzir:
@@ -459,7 +481,7 @@ Reproduzir:
 
 ## Como rodar
 
-Requisitos: Node 22, pnpm 12 e Docker (com cerca de 2 GB de RAM livres para os serviços).
+Requisitos: Node 22, pnpm 12, .NET 8 SDK (versão legada) e Docker (com cerca de 2 GB de RAM livres para os serviços).
 
 ```bash
 git clone https://github.com/PhrStyle/rework-budgets-system.git
@@ -477,6 +499,8 @@ pnpm test
 | `pnpm infra:reset` | Apaga os volumes e começa do zero |
 | `pnpm redis:cache` / `redis:data` | Abre o `redis-cli` em cada instância |
 | `pnpm seed:generate -- --profile small` | Gera um conjunto pequeno (60 orçamentos), o mesmo usado nos testes |
+| `pnpm legacy:seed full` | Carrega os dados no banco da legada (`budgets_legacy`) e compara os totais com a regra nova |
+| `pnpm legacy:test` | Testes da legada (xUnit + Testcontainers; precisa de Docker) |
 
 | Serviço | Porta local (padrão) | Configuração |
 |---|---|---|
@@ -520,7 +544,7 @@ docs/adr/             decisões de arquitetura
 
 ## Status
 
-**Pronto =** as duas versões funcionando, com os 12 problemas reproduzidos na legada e resolvidos na nova, medidos e documentados.
+**Pronto =** as duas versões funcionando, com os 13 problemas reproduzidos na legada e resolvidos na nova, medidos e documentados.
 
 - [x] Protótipo visual (`prototype/index.html`)
 - [x] Repositório, CI e convenções
@@ -528,7 +552,8 @@ docs/adr/             decisões de arquitetura
 - [x] `packages/budget-calc` + casos compartilhados
 - [x] Infra local (Docker Compose: Postgres, `redis-cache`, `redis-data`, Elasticsearch)
 - [x] Gerador de dados determinístico
-- [ ] Versão legada (ASP.NET Core Razor Pages + jQuery)
+- [x] Versão legada: modelo (EF Core, `decimal`), cálculo com o paliativo e carga dos dados
+- [ ] Versão legada: API, front Razor Pages intermediário e telas em jQuery
 - [ ] API nova: Postgres → Redis → Elasticsearch
 - [ ] Front (React + Vite + TanStack Query)
 - [ ] Ambiente “VPS” e benchmark
