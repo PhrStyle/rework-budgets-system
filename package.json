@@ -18,7 +18,8 @@
     "infra:reset": "docker compose down -v && docker compose up -d --wait",
     "infra:ps": "docker compose ps",
     "redis:cache": "docker compose exec redis-cache redis-cli",
-    "redis:data": "docker compose exec redis-data redis-cli"
+    "redis:data": "docker compose exec redis-data redis-cli",
+    "seed:generate": "pnpm --filter @budgets/seed generate"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
