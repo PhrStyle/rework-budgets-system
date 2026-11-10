@@ -426,7 +426,7 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 | **Ambiente “VPS”** | ⟨Docker com `--cpus=4 --memory=8g`; latência e banda injetadas entre o cliente e a API⟩ |
 | **Calibração** | ⟨RTT medido de verdade do Brasil até uma VPS em US Central: X ms; CPU calibrada com benchmark⟩ |
 | **Carga** | ⟨k6, N usuários virtuais, cenários em `bench/`⟩ |
-| **Dados** | ⟨seed: N orçamentos, grupo grande com 5.000 itens⟩ |
+| **Dados** | Gerador determinístico ([`packages/seed`](packages/seed/src/generate.ts)), semente fixa: 3.200 orçamentos e 426 mil itens; 5.500 produtos (un, m, L, kg); 2.200 clientes; 60% pequenos (até 60 itens), 30% médios (até 300), 9,5% grandes (12 grupos, 300 a 800 itens), 16 no pior caso real (15 grupos, 1.000 itens) e 1 de estresse sintético (5.000 itens, acima do real); 40% contêm uma versão anterior. Um teste trava o hash da saída |
 | **Legada** | Versão simplificada em ASP.NET Core Razor Pages + jQuery (`legacy/`), na stack original, reproduzindo os 12 problemas, contra o mesmo Postgres e os mesmos dados |
 | **O que não está aqui** | ⟨limitações conhecidas da medição⟩ |
 
@@ -467,6 +467,7 @@ cd rework-budgets-system
 cp .env.example .env        # troque a senha; mude as portas se alguma já estiver em uso
 pnpm install
 pnpm infra:up               # Postgres, redis-cache, redis-data e Elasticsearch
+pnpm seed:generate          # dados de exemplo em data/seed/full (~60 MB, fora do git)
 pnpm test
 ```
 
@@ -475,6 +476,7 @@ pnpm test
 | `pnpm infra:up` / `infra:down` | Sobe ou para os serviços, mantendo os dados |
 | `pnpm infra:reset` | Apaga os volumes e começa do zero |
 | `pnpm redis:cache` / `redis:data` | Abre o `redis-cli` em cada instância |
+| `pnpm seed:generate -- --profile small` | Gera um conjunto pequeno (60 orçamentos), o mesmo usado nos testes |
 
 | Serviço | Porta local (padrão) | Configuração |
 |---|---|---|
@@ -493,6 +495,7 @@ apps/web              front React + Vite
 packages/money        dinheiro em inteiros
 packages/budget-calc  regras de cálculo do orçamento
 packages/contracts    contratos da API compartilhados
+packages/seed         gerador determinístico dos dados de exemplo
 fixtures/             casos de cálculo compartilhados (nova e legada)
 legacy/               versão legada em ASP.NET Core Razor Pages + jQuery
 bench/                k6 + perfis de rede (Toxiproxy)
@@ -524,7 +527,7 @@ docs/adr/             decisões de arquitetura
 - [x] `packages/money` + testes
 - [x] `packages/budget-calc` + casos compartilhados
 - [x] Infra local (Docker Compose: Postgres, `redis-cache`, `redis-data`, Elasticsearch)
-- [ ] Gerador de dados determinístico
+- [x] Gerador de dados determinístico
 - [ ] Versão legada (ASP.NET Core Razor Pages + jQuery)
 - [ ] API nova: Postgres → Redis → Elasticsearch
 - [ ] Front (React + Vite + TanStack Query)

@@ -28,3 +28,6 @@ bench/results/
 
 # Documentos locais (não versionados)
 PLANO.md
+
+# Dados gerados (pnpm seed:generate)
+data/

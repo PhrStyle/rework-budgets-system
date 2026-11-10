@@ -1,0 +1,23 @@
+{
+  "name": "@budgets/seed",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Gerador determinístico dos dados de exemplo, os mesmos para a versão legada e a nova.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "generate": "tsx src/cli.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@budgets/budget-calc": "workspace:*",
+    "@budgets/money": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "fast-check": "^4.10.2",
+    "tsx": "^4.23.15"
+  }
+}
