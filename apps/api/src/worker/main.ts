@@ -1,7 +1,7 @@
 import { pino } from 'pino';
 
 import { createPrisma } from '../db/prisma.js';
-import { elasticsearchUrl } from '../db/url.js';
+import { elasticsearchUrl, redisDataUrl } from '../db/url.js';
 import { createElastic } from '../search/elastic.js';
 import { ElasticIndexer } from '../search/elastic-indexer.js';
 import { startWorker } from './worker.js';
@@ -15,7 +15,7 @@ const logger = pino({
 });
 const prisma = createPrisma();
 const worker = await startWorker({
-  redisDataUrl: `redis://127.0.0.1:${process.env.REDIS_DATA_PORT ?? '6380'}`,
+  redisDataUrl: redisDataUrl(),
   prisma,
   // Prazo maior que o da API: aqui ninguém espera na tela, e a fila repete o que falhar.
   indexer: new ElasticIndexer(createElastic(elasticsearchUrl(), 10_000)),

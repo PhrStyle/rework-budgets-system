@@ -13,3 +13,12 @@ export function databaseUrl(env: NodeJS.ProcessEnv = process.env): string {
 export function elasticsearchUrl(env: NodeJS.ProcessEnv = process.env): string {
   return env.ELASTICSEARCH_URL ?? `http://127.0.0.1:${env.ELASTICSEARCH_PORT ?? '9200'}`;
 }
+
+/** `redis-cache` e `redis-data`: o endereço inteiro por variável (containers), ou a porta local. */
+export function redisCacheUrl(env: NodeJS.ProcessEnv = process.env): string {
+  return env.REDIS_CACHE_URL ?? `redis://127.0.0.1:${env.REDIS_CACHE_PORT ?? '6379'}`;
+}
+
+export function redisDataUrl(env: NodeJS.ProcessEnv = process.env): string {
+  return env.REDIS_DATA_URL ?? `redis://127.0.0.1:${env.REDIS_DATA_PORT ?? '6380'}`;
+}

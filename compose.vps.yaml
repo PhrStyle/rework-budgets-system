@@ -1,0 +1,100 @@
+# Ambiente "VPS": emula a máquina de produção (Contabo, US Central, 4 vCPUs, 8 GB) na máquina local.
+#
+#   docker compose -f compose.yaml -f compose.vps.yaml --profile vps up -d --wait
+#   bash bench/vps/rede.sh        # a rede até o usuário (Toxiproxy)
+#
+# - Toda a pilha divide 4 CPUs: a infraestrutura usa 2,5 e cada versão tem 1,5 (rodam uma de cada
+#   vez no benchmark). A memória somada fica abaixo de 8 GB.
+# - As aplicações ficam na rede do compose e falam com a infraestrutura pelo nome do serviço, como
+#   numa VPS de uma máquina só. O usuário entra pelo Toxiproxy, que emula a rede Brasil ↔ US Central;
+#   o k6 roda dentro da mesma rede (bench/run.sh), sem passar pelo encaminhamento de portas do Docker.
+
+x-node: &node
+  image: node:22-bookworm-slim
+  profiles: [vps]
+  env_file: .env
+  environment: &node-env
+    NODE_ENV: production
+    LOG_LEVEL: warn
+    API_HOST: 0.0.0.0
+    DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/budgets_v2
+    REDIS_CACHE_URL: redis://redis-cache:6379
+    REDIS_DATA_URL: redis://redis-data:6379
+    ELASTICSEARCH_URL: http://elasticsearch:9200
+  volumes:
+    - .:/app:ro
+  depends_on: [postgres, redis-cache, redis-data, elasticsearch]
+
+x-dotnet: &dotnet
+  image: mcr.microsoft.com/dotnet/aspnet:8.0
+  profiles: [vps]
+  working_dir: /app
+  environment: &dotnet-env
+    ASPNETCORE_ENVIRONMENT: Production
+    Logging__LogLevel__Default: Warning
+    ConnectionStrings__Legado: Host=postgres;Port=5432;Database=budgets_legacy;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
+
+services:
+  # ---------- infraestrutura (2,5 CPUs) ----------
+  postgres:
+    deploy: { resources: { limits: { cpus: '1.25', memory: 2g } } }
+  elasticsearch:
+    # A memória (1 GB) já vem do compose.yaml (mem_limit); aqui só a CPU.
+    cpus: 0.75
+  redis-cache:
+    deploy: { resources: { limits: { cpus: '0.25', memory: 320m } } }
+  redis-data:
+    deploy: { resources: { limits: { cpus: '0.25', memory: 320m } } }
+
+  # ---------- versão nova (1,5 CPU) ----------
+  api:
+    <<: *node
+    working_dir: /app/apps/api
+    command: [node_modules/.bin/tsx, src/main.ts]
+    deploy: { resources: { limits: { cpus: '1.0', memory: 1g } } }
+  worker:
+    <<: *node
+    working_dir: /app/apps/api
+    command: [node_modules/.bin/tsx, src/worker/main.ts]
+    deploy: { resources: { limits: { cpus: '0.25', memory: 512m } } }
+  web:
+    image: nginx:1.27-alpine
+    profiles: [vps]
+    volumes:
+      - ./apps/web/dist:/usr/share/nginx/html:ro
+      - ./infra/web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on: [api]
+    deploy: { resources: { limits: { cpus: '0.25', memory: 128m } } }
+
+  # ---------- versão legada (1,5 CPU) ----------
+  legacy-api:
+    <<: *dotnet
+    command: [dotnet, Budgets.Legacy.Api.dll]
+    environment:
+      <<: *dotnet-env
+      ASPNETCORE_URLS: http://0.0.0.0:5080
+    volumes:
+      - ./bench/vps/out/legacy-api:/app:ro
+    depends_on: [postgres]
+    deploy: { resources: { limits: { cpus: '0.75', memory: 1g } } }
+  legacy-web:
+    <<: *dotnet
+    command: [dotnet, Budgets.Legacy.Web.dll]
+    environment:
+      <<: *dotnet-env
+      ASPNETCORE_URLS: http://0.0.0.0:5081
+      Api__BaseUrl: http://legacy-api:5080/
+    volumes:
+      - ./bench/vps/out/legacy-web:/app:ro
+    depends_on: [legacy-api]
+    deploy: { resources: { limits: { cpus: '0.75', memory: 1g } } }
+
+  # ---------- a rede até o usuário ----------
+  # Legada: toxiproxy:15081 → legacy-web:5081 (o front Razor) · Nova: toxiproxy:18080 → web:8088 (nginx).
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.12.0
+    profiles: [vps]
+    ports:
+      - '127.0.0.1:8474:8474'
+      - '127.0.0.1:15081:15081'
+      - '127.0.0.1:18080:18080'
