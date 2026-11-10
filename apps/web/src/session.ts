@@ -1,6 +1,8 @@
 import { useSyncExternalStore } from 'react';
 import type { Ref } from '@budgets/contracts';
 
+import { setReportedUser } from './observability.js';
+
 /**
  * Login simulado, como na legada: o usuário escolhido fica no navegador e vai no cabeçalho
  * `x-user-id`. Não é dado do orçamento (esse fica no servidor): é só "quem está usando esta aba".
@@ -29,6 +31,7 @@ export function setUser(user: Ref | null): void {
     // navegador sem armazenamento: o login vale só até recarregar
   }
   for (const l of listeners) l();
+  setReportedUser(user?.id ?? null);
 }
 
 function subscribe(listener: () => void): () => void {
