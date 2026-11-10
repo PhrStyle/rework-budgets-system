@@ -1,56 +1,37 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-
-import { generate } from '@budgets/seed';
-import { PostgreSqlContainer } from '@testcontainers/postgresql';
-import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { PrismaClient } from '../generated/prisma/client.js';
-import { loadDataset } from './load.js';
+import { startTestDatabase } from '../testing/database.js';
+import type { TestDatabase } from '../testing/database.js';
 import { createPrisma } from './prisma.js';
 import { verifyTotals } from './verify.js';
 
-// Mesma semente de `pnpm seed:generate`: os dados do teste são os do perfil small.
-const dataset = generate('small', 20_261_110);
-
-let container: StartedPostgreSqlContainer;
-let pool: pg.Pool;
+let db: TestDatabase;
 let prisma: PrismaClient;
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer('postgres:18.6-alpine').start();
-  const url = container.getConnectionUri();
-  // As migrations de verdade, como no deploy: o teste pega um CHECK esquecido ou uma coluna trocada.
-  await promisify(execFile)('pnpm', ['exec', 'prisma', 'migrate', 'deploy'], {
-    cwd: new URL('../..', import.meta.url),
-    env: { ...process.env, DATABASE_URL: url },
-  });
-  pool = new pg.Pool({ connectionString: url });
-  prisma = createPrisma(url);
-  await loadDataset(pool, dataset);
+  db = await startTestDatabase();
+  prisma = createPrisma(db.url);
 }, 180_000);
 
 afterAll(async () => {
   await prisma.$disconnect();
-  await pool.end();
-  await container.stop();
+  await db.stop();
 });
 
 describe('carga do gerador no banco da versão nova', () => {
   it('relê tudo pelo Prisma e cada total bate com o gerador, centavo por centavo', async () => {
-    const report = await verifyTotals(prisma, dataset.expectedTotals);
+    const report = await verifyTotals(prisma, db.dataset.expectedTotals);
 
     expect(report.mismatches).toEqual([]);
-    expect(report.budgets).toBe(dataset.budgets.length);
+    expect(report.budgets).toBe(db.dataset.budgets.length);
     expect(report.items).toBe(
-      dataset.budgets.flatMap((b) => b.groups.flatMap((g) => g.items)).length,
+      db.dataset.budgets.flatMap((b) => b.groups.flatMap((g) => g.items)).length,
     );
   });
 
   it('guarda os vínculos entre orçamentos', async () => {
-    const linked = dataset.budgets.filter((b) => b.parentId !== null);
+    const linked = db.dataset.budgets.filter((b) => b.parentId !== null);
     const count = await prisma.budget.count({ where: { parentId: { not: null } } });
 
     expect(count).toBe(linked.length);
@@ -63,7 +44,7 @@ describe('carga do gerador no banco da versão nova', () => {
       data: { totalCents: item.totalCents + 1n },
     });
     try {
-      const report = await verifyTotals(prisma, dataset.expectedTotals);
+      const report = await verifyTotals(prisma, db.dataset.expectedTotals);
       expect(report.mismatches).toEqual([
         `item ${item.id}: gravado ${item.totalCents + 1n}, recalculado ${item.totalCents}`,
       ]);
@@ -121,6 +102,6 @@ describe('carga do gerador no banco da versão nova', () => {
       'items_group_id_fkey',
     ],
   ])('o banco recusa %s', async (_, sql, constraint) => {
-    await expect(pool.query(sql)).rejects.toThrow(constraint);
+    await expect(db.pool.query(sql)).rejects.toThrow(constraint);
   });
 });

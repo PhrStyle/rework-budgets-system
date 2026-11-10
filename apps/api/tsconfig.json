@@ -2,7 +2,11 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "types": ["node"]
+    "types": ["node"],
+    // Decorators do Nest. Sem metadata de tipos: o esbuild (tsx, Vitest) não a gera, então
+    // toda injeção é explícita, com @Inject(Token), e roda igual em qualquer executor.
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": false
   },
   "include": ["src", "prisma.config.ts"]
 }

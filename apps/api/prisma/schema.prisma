@@ -96,7 +96,8 @@ model Group {
   itemCount     Int    @map("item_count")
   items         Item[]
 
-  @@index([budgetId, position])
+  /// Única: a ordem não fica ambígua e serve de cursor.
+  @@unique([budgetId, position])
   @@map("groups")
 }
 
@@ -117,7 +118,8 @@ model Item {
   position   Int
   totalCents BigInt  @map("total_cents")
 
-  @@index([groupId, position])
+  /// Única: é o cursor da paginação dos itens (uma posição repetida sumiria entre duas páginas).
+  @@unique([groupId, position])
   @@index([productId])
   @@map("items")
 }
