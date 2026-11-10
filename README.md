@@ -376,13 +376,24 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 ### 7. Tela complexa acoplada ao cálculo
 
 - **Problema:** ⟨Inserir produto acima/abaixo de uma linha, reordenar, editar quantidade e desconto, tudo em jQuery manipulando o DOM e recalculando. Na época, eu já defendia uma SPA (ex.: React): cálculos, status e taxas precisavam ser dinâmicos, e o modelo de páginas com jQuery não acompanhava isso.⟩
-- **Impacto:** ⟨…⟩
+- **Impacto:** A tela era, ao mesmo tempo, a interface e a calculadora: cada edição em jQuery mexia no DOM e chamava um recálculo que **lia os valores de volta do texto da página** (“R$ 1.234,56”), em float, com o arredondamento para cima. O total mostrado era uma prévia que podia não bater com o que o servidor gravava.
 - **Solução:**
-  - ⟨Front só exibe o estado devolvido pela API⟩
-  - ⟨Posição por índice fracionário: mover um item altera uma linha⟩
+  - A tela (React) **não calcula nada**: cada edição vira uma operação no rascunho, e a tela mostra os totais que a API devolveu (calculados pelo mesmo `budget-calc` do salvar).
+  - Cada campo grava ao sair (ou Enter), não a cada tecla, e lê o texto com as **mesmas regras da API** (`packages/money`): “1,5” num item em “un” fica marcado e não é enviado.
+  - Inserir acima/abaixo e arrastar viram uma operação com o vizinho de referência; a posição nova é o meio entre os vizinhos, sem renumerar a lista.
+  - Edições rápidas podem voltar fora de ordem: o contador de alterações do rascunho decide qual resposta é a mais nova.
 
-- **Resultado:** ⟨…⟩
-- **Onde ver:** ⟨…⟩
+- **Resultado** (conferido no navegador, dados completos):
+
+| Métrica | Antes | Depois |
+|---|---|---|
+| Onde o total da tela é calculado | no navegador, lendo o texto do DOM (float + arredondamento para cima) | na API; a tela só exibe |
+| Tela × salvo | prévia R$ 50.348.384,78, salvo R$ 50.348.384,65 | iguais: R$ 39.621.923,94 na tela antes de salvar, depois de salvar e no banco |
+| Quantidade inválida para a unidade | ⟨não reproduzido na legada⟩ | marcada no campo, nada enviado |
+| Mover um item | DOM, e o orçamento inteiro reenviado ao salvar | 1 operação no rascunho |
+
+- **Trade-offs:** Cada edição é uma ida ao servidor (~9 ms localmente, medido na etapa 5); sem atualização otimista, de propósito: mostrar um valor calculado no navegador antes da resposta recriaria a prévia que diverge do salvo. O efeito com a rede da VPS é medido na etapa 9.
+- **Onde ver:** legada: `recalcular()` em [`orcamento.js`](legacy/src/Budgets.Legacy.Web/wwwroot/js/orcamento.js) · nova: [`GroupCard.tsx`](apps/web/src/components/GroupCard.tsx) (linhas editáveis, inserir, arrastar), [`Field.tsx`](apps/web/src/components/Field.tsx) (grava ao sair, valida com `packages/money`), [`draft.ts`](apps/web/src/api/draft.ts) (operações, ordem das respostas, abas)
 
 ---
 
@@ -439,7 +450,7 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
   - **O rascunho segura o bloqueio:** a marcação “aberto” no banco, que já expirava sozinha, vira um bloqueio no Redis (`SET NX` com TTL) ligado ao **rascunho**, e não à tela: expira junto com ele, 30 minutos após a última edição. Enquanto houver alterações não salvas, ninguém mais edita; sem rascunho, o orçamento fica livre.
   - **Abas do mesmo usuário compartilham o rascunho:** cada edição é um *compare-and-set* (script Lua) na revisão do rascunho; se outra aba gravou no meio, a edição é refeita sobre a versão nova, e nenhuma se perde
   - **Versão por grupo no salvar:** cada grupo tocado precisa estar na versão em que o rascunho o leu; se algo gravou fora do rascunho, o salvar responde 409 com os grupos e não grava nada
-  - ⟨**Abas atualizadas** (etapa 8): após cada edição, as outras abas recebem o aviso (`BroadcastChannel`) e recarregam do rascunho⟩
+  - **Abas atualizadas:** após cada edição, a aba avisa as outras do mesmo navegador (`BroadcastChannel`), que recarregam do rascunho sem recarregar a página (conferido: margem mudada numa aba apareceu na outra, com o mesmo total)
 
 - **Resultado:**
 
@@ -527,19 +538,19 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 - **Problema:** Como o front só tinha os grupos abertos, uma mudança que afetava o orçamento inteiro não podia ser calculada no navegador. Ao mudar a margem, o ajuste de prazo (dilação) ou ao salvar, a página era **recarregada** e uma função de **recálculo no back** atualizava os totais.
 - **Impacto:** O fluxo de trabalho era interrompido a cada mudança global: a tela piscava, os grupos abertos fechavam e a rolagem se perdia. Era o paliativo de um paliativo: o cálculo no front existia para a tela responder rápido, mas as mudanças mais importantes acabavam no servidor e num recarregamento.
 - **Solução:**
-  - Mudar margem ou ajuste de prazo é um `PATCH` no rascunho; o servidor recalcula com `calcFromSubtotals`, a partir dos subtotais dos grupos e dos totais dos filhos, **sem ler item nenhum**, e devolve o total.
+  - Mudar margem ou ajuste de prazo é uma operação no rascunho; o servidor recalcula com `calcFromSubtotals`, a partir dos subtotais dos grupos e dos totais dos filhos, **sem ler item nenhum**, e devolve o total.
   - A tela atualiza só os números que mudaram (TanStack Query), sem recarregar a página: os grupos abertos e a rolagem continuam onde estavam.
   - Como o servidor é a única fonte do cálculo, não existe mais “prévia” no front que precise ser corrigida depois.
 - **Resultado:**
 
 | Métrica | Antes | Depois |
 |---|---|---|
-| Recarregamentos de página ao mudar a margem | 1, salvando o orçamento inteiro (151 KB, ~450 ms em rede local, pior caso real) e fechando os grupos abertos | 0 |
+| Recarregamentos de página ao mudar a margem | 1, salvando o orçamento inteiro (151 KB, ~450 ms em rede local, pior caso real) e fechando os grupos abertos | 0 (conferido no navegador; os grupos abertos continuam abertos) |
 | Itens lidos para recalcular a margem (orçamento de 1.000 itens) | todos | 0 |
 | Tempo até a tela mostrar o novo total (ambiente “VPS”) | — | — |
 
-- **Trade-offs:** ⟨A atualização depende de uma ida ao servidor; com o cálculo em inteiros compartilhado, o front pode mostrar o valor na hora (otimista) e o servidor confirma.⟩
-- **Onde ver:** legada: o tratamento de `#prazo` e `#margem` em [`orcamento.js`](legacy/src/Budgets.Legacy.Web/wwwroot/js/orcamento.js) · ⟨nova: …⟩
+- **Trade-offs:** A atualização depende de uma ida ao servidor. Mostrar o valor antes (otimista) seria possível com o cálculo em inteiros compartilhado, mas foi descartado de propósito: recriaria uma prévia que pode divergir do salvo.
+- **Onde ver:** legada: o tratamento de `#prazo` e `#margem` em [`orcamento.js`](legacy/src/Budgets.Legacy.Web/wwwroot/js/orcamento.js) · nova: os campos de margem e prazo em [`BudgetPage.tsx`](apps/web/src/pages/BudgetPage.tsx), que viram uma operação no rascunho
 
 ---
 
@@ -673,7 +684,7 @@ docs/adr/             decisões de arquitetura
 - [x] API nova: outbox, fila (BullMQ) e worker separado, com a conferência de drift agendada
 - [x] API nova: Elasticsearch na listagem e no autocomplete (acentos, erro de digitação, prefixo), com o Postgres de reserva
 - [x] Tela nova (React + Vite + TanStack Query): login, listagem com busca, orçamento com grupos carregados por página e aviso de quem está editando
-- [ ] Tela nova: edição em rascunho
+- [x] Tela nova: edição em rascunho (cabeçalho, itens, inserir acima/abaixo, arrastar, grupos), barra com Salvar/Descartar e abas sincronizadas
 - [ ] Tela nova: deploy sem cache velho e testes no navegador
 - [ ] Ambiente “VPS” e benchmark
 - [ ] README preenchido com os números

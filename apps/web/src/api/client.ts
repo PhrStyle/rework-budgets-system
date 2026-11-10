@@ -2,10 +2,13 @@ import type {
   ApiError,
   BudgetDetail,
   BudgetSummary,
+  DraftOpInput,
+  DraftOpsResult,
   GroupItemsPage,
   Page,
   Product,
   Ref,
+  SaveResult,
 } from '@budgets/contracts';
 
 import { currentUser } from '../session.js';
@@ -68,6 +71,17 @@ export const api = {
     (await request(
       `/budgets/${budgetId}/groups/${groupId}/items${qs({ after, limit: 100 })}`,
     )) as GroupItemsPage,
+  openDraft: async (id: number) =>
+    (await request(`/budgets/${id}/draft`, { method: 'POST' })) as BudgetDetail,
+  applyOps: async (id: number, ops: DraftOpInput[]) =>
+    (await request(`/budgets/${id}/draft/ops`, {
+      method: 'POST',
+      body: JSON.stringify({ ops }),
+    })) as DraftOpsResult,
+  saveDraft: async (id: number) =>
+    (await request(`/budgets/${id}/draft/save`, { method: 'POST' })) as SaveResult,
+  discardDraft: async (id: number) =>
+    (await request(`/budgets/${id}/draft`, { method: 'DELETE' })) as BudgetDetail,
   products: async (search: string) =>
     (await request(`/products${qs({ search, limit: 10 })}`)) as Product[],
 };
