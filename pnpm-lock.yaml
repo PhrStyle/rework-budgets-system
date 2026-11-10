@@ -194,6 +194,16 @@ importers:
         specifier: ^5.1.0
         version: 5.1.0(@vitest/coverage-v8@5.1.0)(vite@8.3.6)
 
+  packages/budget-calc:
+    dependencies:
+      '@budgets/money':
+        specifier: workspace:*
+        version: link:../money
+    devDependencies:
+      fast-check:
+        specifier: ^4.10.2
+        version: 4.10.2
+
   packages/money:
     devDependencies:
       fast-check:
