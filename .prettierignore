@@ -9,3 +9,7 @@ prototype/
 legacy/
 # client gerado pelo Prisma (prisma generate)
 apps/api/src/generated/
+# binários da legada publicados para o benchmark
+bench/vps/out/
+# resultados do k6
+bench/results/

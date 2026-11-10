@@ -11,6 +11,8 @@ export default tseslint.config(
       '**/coverage/**',
       'prototype/**',
       'legacy/**',
+      // binários da legada publicados para o benchmark
+      'bench/vps/out/**',
       // client gerado pelo Prisma (prisma generate)
       'apps/api/src/generated/**',
     ],
@@ -46,6 +48,11 @@ export default tseslint.config(
     // Nos testes, um auxiliar genérico dá tipo ao JSON da resposta (`res.json<T>()`).
     files: ['**/*.test.ts'],
     rules: { '@typescript-eslint/no-unnecessary-type-parameters': 'off' },
+  },
+  {
+    // Scripts do k6 (benchmark): globais que o próprio k6 injeta.
+    files: ['bench/k6/**/*.js'],
+    languageOptions: { globals: { __ENV: 'readonly', __VU: 'readonly', __ITER: 'readonly' } },
   },
   {
     files: ['**/*.js'],

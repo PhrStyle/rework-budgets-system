@@ -39,7 +39,7 @@
 
 - **Antes:** um orçamento editado em três lugares (navegador, front em Razor e API), calculado em dois (JavaScript e C#, que não batiam), salvo inteiro, recarregado a cada mudança de margem e aceitável em dev, mas lento na VPS dos EUA.
 - **Depois:** a edição vai para um **rascunho no Redis** e só vira oficial em “Salvar alterações”; o servidor calcula com **inteiros**, por **delta**; a busca vai para o **Elasticsearch**; o front só exibe.
-- **Resultado:** ⟨1 frase com o principal ganho medido, ex.: “abrir um grupo de 5 mil itens: X s → Y ms no ambiente emulado da VPS”⟩.
+- **Resultado:** salvar 1 alteração no pior caso real (1.000 itens), com a rede da VPS emulada: **1,1 s → 170 ms** com 1 usuário e **1,8 s → 169 ms** com 16 ao mesmo tempo, enquanto o Postgres cai de **101% para 8% de CPU**; e a tela mostra o mesmo total que fica salvo.
 
 <!-- GIF curto: abrir orçamento grande na legada vs nova, lado a lado (docs/img/antes-depois.gif) -->
 <!-- ![Antiga × nova](docs/img/antes-depois.gif) -->
@@ -122,35 +122,35 @@ Agrupados por tema; os números são os mesmos dos estudos de caso e do diagrama
 
 | # | Problema (antes) | Impacto | Solução (agora) | Resultado |
 |---|---|---|---|---|
-| 1 | Orçamento inteiro recalculado no navegador a cada alteração (jQuery lendo e escrevendo o DOM) | Tela travando com milhares de itens | Cálculo no servidor, incremental por **delta** | — |
+| 1 | Orçamento inteiro recalculado no navegador a cada alteração (jQuery lendo e escrevendo o DOM) | Tela travando com milhares de itens | Cálculo no servidor, incremental por **delta** | tela × salvo: R$ 0,13 → R$ 0,00 |
 | 4 | A mesma regra em JS (float) e em C# (decimal), cada lado calculando uma parte; paliativo: arredondar sempre para cima | Valor na tela ≠ valor gravado; totais enviesados para cima | Dinheiro em **inteiros**, uma só implementação, arredondamento comercial só nas divisões | R$ 988,32 a mais na base de exemplo → R$ 0,00 |
-| 8 | Sem testes no front, justamente onde estava parte do cálculo | Erros de valor só apareciam em uso | Cálculo em funções puras de TypeScript, cobertas por testes | 0 → 58 testes |
-| 14 | Mudar margem, ajuste de prazo (dilação) ou salvar recarregava a página para o back recalcular | Fluxo de trabalho interrompido a cada mudança global | O servidor recalcula a partir dos subtotais; a tela atualiza sem recarregar | — |
-| 5 | Orçamento dentro de orçamento (1 nível): o pai guardava uma cópia do total do filho | Total do pai defasado | O servidor valida a profundidade e soma o total atual dos filhos | — |
+| 8 | Sem testes no front, justamente onde estava parte do cálculo | Erros de valor só apareciam em uso | Cálculo em funções puras de TypeScript, cobertas por testes | 0 → 147 testes + 3 no navegador |
+| 14 | Mudar margem, ajuste de prazo (dilação) ou salvar recarregava a página para o back recalcular | Fluxo de trabalho interrompido a cada mudança global | O servidor recalcula a partir dos subtotais; a tela atualiza sem recarregar | mudar margem: 1,1 s → 157 ms, sem recarregar |
+| 5 | Orçamento dentro de orçamento (1 nível): o pai guardava uma cópia do total do filho | Total do pai defasado | O servidor valida a profundidade e soma o total atual dos filhos | total do pai recalculado ao salvar o filho (teste) |
 
 ### Carregar e salvar
 
 | # | Problema (antes) | Impacto | Solução (agora) | Resultado |
 |---|---|---|---|---|
-| 11 | Salvar enviava o orçamento **inteiro** (ex.: 12 grupos e 500+ produtos para mudar um) | Salvamentos lentos e transações enormes | Salvar grava só o *changeset* do rascunho, numa transação | — |
-| 2 | Lazy loading de grupos com cache em `localStorage` | Cache por navegador, com cota e sem invalidação | Itens paginados; cópias no **Redis** com invalidação | — |
-| 12 | Edição só na página até salvar; para não perder trabalho, salvamento automático a cada 5 min | Queda de energia perdia o progresso; o automático gravava simulações | Rascunho no servidor e “Salvar alterações”; sem salvamento automático | — |
+| 11 | Salvar enviava o orçamento **inteiro** (ex.: 12 grupos e 500+ produtos para mudar um) | Salvamentos lentos e transações enormes | Salvar grava só o *changeset* do rascunho, numa transação | salvar: 152 KB e 1,1 s → 60 B e 170 ms |
+| 2 | Lazy loading de grupos com cache em `localStorage` | Cache por navegador, com cota e sem invalidação | Itens paginados; cópias no **Redis** com invalidação | chaves órfãs no navegador: 15 → 0 |
+| 12 | Edição só na página até salvar; para não perder trabalho, salvamento automático a cada 5 min | Queda de energia perdia o progresso; o automático gravava simulações | Rascunho no servidor e “Salvar alterações”; sem salvamento automático | progresso perdido ao fechar: tudo → nada (por até 30 min) |
 
 ### Edição e concorrência
 
 | # | Problema (antes) | Impacto | Solução (agora) | Resultado |
 |---|---|---|---|---|
-| 10 | Bloqueio “aberto” no banco entre usuários; o mesmo usuário em várias abas, cada uma com seu estado | Abas desatualizadas salvando por cima uma da outra | Um rascunho por usuário no servidor, compartilhado pelas abas, segurando o bloqueio | — |
-| 7 | Tela complexa em jQuery (inserir acima/abaixo, reordenar) misturada ao cálculo | Difícil de manter e de evoluir | O front só exibe o estado; reordenar muda uma posição | — |
+| 10 | Bloqueio “aberto” no banco entre usuários; o mesmo usuário em várias abas, cada uma com seu estado | Abas desatualizadas salvando por cima uma da outra | Um rascunho por usuário no servidor, compartilhado pelas abas, segurando o bloqueio | 10 edições simultâneas, 0 perdidas (teste) |
+| 7 | Tela complexa em jQuery (inserir acima/abaixo, reordenar) misturada ao cálculo | Difícil de manter e de evoluir | O front só exibe o estado; reordenar muda uma posição | a tela não calcula; total da tela = total salvo |
 
 ### Arquitetura e operação
 
 | # | Problema (antes) | Impacto | Solução (agora) | Resultado |
 |---|---|---|---|---|
-| 13 | jQuery → front (Razor) → API → front → jQuery | Dois servidores e duas serializações por chamada; endpoints e DTOs duplicados | O navegador chama uma API só, com contratos compartilhados | — |
-| 6 | Aceitável em dev, lento na VPS dos EUA | Latência e CPU de produção invisíveis no dev | Projeto pensado para latência; benchmark num ambiente que emula a VPS | — |
-| 3 | Busca e filtro de orçamentos ⟨como era⟩ | ⟨lentidão / filtros limitados⟩ | Índice de busca (Elasticsearch) atualizado por fila | — |
-| 9 | Depois de cada deploy, o navegador usava o JS antigo com o back novo; a saída era Ctrl+F5 | Telas quebradas que pareciam bugs; perda de confiança no time | Arquivos com hash no nome, aviso de nova versão, contratos compartilhados | — |
+| 13 | jQuery → front (Razor) → API → front → jQuery | Dois servidores e duas serializações por chamada; endpoints e DTOs duplicados | O navegador chama uma API só, com contratos compartilhados | requisições por rodada: 39 → 10 |
+| 6 | Aceitável em dev, lento na VPS dos EUA | Latência e CPU de produção invisíveis no dev | Projeto pensado para latência; benchmark num ambiente que emula a VPS | salvar: 1,1 s → 170 ms |
+| 3 | Busca e filtro de orçamentos ⟨como era⟩ | ⟨lentidão / filtros limitados⟩ | Índice de busca (Elasticsearch) atualizado por fila | “farmacia”: 0 → 182 resultados |
+| 9 | Depois de cada deploy, o navegador usava o JS antigo com o back novo; a saída era Ctrl+F5 | Telas quebradas que pareciam bugs; perda de confiança no time | Arquivos com hash no nome, aviso de nova versão, contratos compartilhados | Ctrl+F5 após deploy: sim → não |
 
 ### Por que trocar de stack?
 
@@ -164,12 +164,34 @@ O banco continua **PostgreSQL**; o Entity Framework dá lugar ao **Prisma**. A m
 
 ## Antiga × nova: números
 
-Mesmas ações, mesmos dados, no ambiente que emula a produção (ver [Como medimos](#como-medimos)).
+Mesmas ações, mesmos dados, as duas versões no mesmo ambiente que emula a produção, uma de cada vez, imitando chamada por chamada o que o navegador de cada uma faz (ver [Como medimos](#como-medimos)).
 
-**Ambiente:** ⟨4 vCPU / 8 GB · RTT ~X ms · Y Mbps · N usuários virtuais⟩ · **Dados:** ⟨orçamento com 5.000 itens em 4 grupos⟩
+**Ambiente:** 4 CPUs / 8 GB no total (infraestrutura 2,5 CPUs; cada versão 1,5) · rede **150 ms de ida e volta, 10/50 Mbit/s** (suposição, não medida) · **Dados:** os 16 orçamentos de pior caso real (15 grupos, 1.000 itens), um por usuário virtual · mediana (p95) em ms
 
-| Cenário | Legada | Nova | Ganho |
+| Cenário | Legada | Nova | |
 |---|---|---|---|
+| Abrir o orçamento (e, na nova, clicar em Editar) | 159 (170) | 309 (323) | **mais lenta**: 2 idas (o detalhe e o rascunho) contra 1 página |
+| Abrir um grupo (70 itens) | 154 (171) | 157 (171) | igual |
+| Editar 1 quantidade: a tela mostra o total | 0, só na página (total em prévia, em float) | 157 (170), o total da API | 1 ida a mais, de propósito |
+| **Salvar 1 alteração** | **1.136 (1.175)** | **170 (182)** | **6,7x** |
+| **Mudar a margem** | **1.148 (1.174)**, salva tudo e recarrega | **157 (169)** | **7,3x** |
+| Buscar orçamentos | 168 (183) | 163 (175) | igual (o ganho é o que acha, ver o caso 3) |
+| Autocomplete de produtos | 165 (176) | 158 (170) | igual |
+| Enviado para salvar 1 alteração | 152 KB | 60 B | |
+| Recebido ao salvar | 171 KB (os grupos e a página de novo) | 2,5 KB | |
+| Requisições por rodada (abrir, grupo, editar, salvar, margem, buscar) | 39 | 10 | |
+| **Com 16 usuários ao mesmo tempo:** salvar | **1.788 (2.597)** | **169 (203)** | **10,6x** |
+| Com 16 usuários: mudar a margem | 1.795 (2.395) | 155 (169) | 11,6x |
+| Com 16 usuários: rodadas completas por segundo | 2,97 | 7,50 | 2,5x |
+| Com 16 usuários: CPU média do Postgres | **101%** (de 125% de limite) | **7,6%** | |
+| Com 16 usuários: CPU média da aplicação | API 63% + front 13% | API 19% + nginx 3% + worker 4% (+ Elasticsearch 22%) | |
+| Divergência de centavos (tela × banco) | R$ 0,13 no pior caso, em 3 edições | R$ 0,00 | conferida no navegador (Playwright) |
+
+O que a tabela mostra: com uma rede de verdade no caminho, cada ida custa ~150 ms, e a legada faz muitas (16 só para salvar: os grupos fechados, o envio e a página de novo), além de subir 152 KB a 10 Mbit/s. Com vários usuários, o gargalo vira o banco: apagar e regravar 1.000 itens por salvamento deixa o Postgres no limite, e o tempo de todos sobe. Na nova, salvar é uma ida e grava 2 linhas.
+
+Resultados brutos: `bench/results/*.json` (gerados pelo k6, fora do git). Medido na máquina do autor (12 núcleos, Docker rootless), com outros containers rodando: há algum ruído, menor que as diferenças medidas.
+
+---|---|---|---|
 | Abrir orçamento (cabeçalho + grupos) | — | — | — |
 | Abrir grupo com 5.000 itens | — | — | — |
 | Editar 1 quantidade: tela atualiza | — | — | — |
@@ -363,13 +385,19 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 ### 6. Rápido em dev, lento em produção
 
 - **Problema:** ⟨Em desenvolvimento a velocidade era aceitável; na VPS Contabo em US Central, com usuários no Brasil, ficava muito lento.⟩
-- **Impacto:** ⟨…⟩
+- **Impacto:** Em desenvolvimento, tudo roda na mesma máquina e cada ida ao servidor custa ~1 ms; o custo de muitas idas e de payloads grandes não aparece. Na produção, cada ida atravessa a rede, e uma arquitetura que faz muitas idas fica lenta sem que nada no código tenha mudado.
 - **Solução:**
-  - ⟨Ambiente de benchmark que emula a VPS: CPU/memória limitadas + latência e banda injetadas⟩
-  - ⟨Menos idas e voltas, payloads pequenos, trabalho pesado em fila⟩
+  - Um ambiente que emula a VPS ([`compose.vps.yaml`](compose.vps.yaml)): CPU e memória limitadas e a rede até o usuário injetada pelo Toxiproxy; as duas versões medidas nele do mesmo jeito.
+  - Menos idas e payloads pequenos: uma API só (sem o front intermediário), o salvar sem corpo e só com o que mudou, a margem sem recarregar a página; trabalho pesado (indexação, conferência de drift) num worker separado.
 
-- **Resultado:** ⟨tabela da seção “Antiga × nova” nos dois ambientes⟩
-- **Onde ver:** ⟨`bench/`⟩
+- **Resultado** (o mesmo salvar de 1 alteração no pior caso real, com e sem a rede da VPS):
+
+| | Na máquina local, sem rede | No ambiente “VPS” | Piora |
+|---|---|---|---|
+| Legada | ~320 ms | ~1.136 ms | 3,5x: 16 idas ao servidor e 152 KB de upload |
+| Nova | ~19 ms | ~170 ms | 1 ida |
+
+- **Onde ver:** [`compose.vps.yaml`](compose.vps.yaml) · [`bench/vps/rede.sh`](bench/vps/rede.sh) · [`bench/k6/`](bench/k6/) · a tabela completa em [Antiga × nova](#antiga--nova-números)
 
 ---
 
@@ -537,7 +565,7 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 | Carregar um grupo de 63 itens (rede local) | 21 ms, dos quais 8 ms só no salto front → API | — |
 | Serializações por chamada | 2 | 1 |
 | Lugares que definem cada endpoint | 2 | 1 |
-| Tempo de uma edição (ambiente “VPS”) | — | — |
+| Tempo de uma edição (ambiente “VPS”) | salvar: 1.136 ms (39 requisições por rodada, cada uma por front e API) | 170 ms (10 requisições por rodada, direto na API) |
 
 - **Trade-offs:** ⟨Com o front como aplicação estática, a API precisa cuidar de CORS e de autenticação diretamente.⟩
 - **Onde ver:** legada: [`Intermediario.cs`](legacy/src/Budgets.Legacy.Web/Intermediario.cs) (endpoints `/front/...` que repassam à API) e os DTOs duplicados em [`Modelos.cs`](legacy/src/Budgets.Legacy.Web/Modelos.cs). O cabeçalho `Server-Timing` mostra no DevTools o tempo de cada salto · nova: contratos com validação em [`packages/contracts`](packages/contracts/src/index.ts), usados direto nos controllers ([`budgets.controller.ts`](apps/api/src/budgets/budgets.controller.ts))
@@ -558,7 +586,7 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 |---|---|---|
 | Recarregamentos de página ao mudar a margem | 1, salvando o orçamento inteiro (151 KB, ~450 ms em rede local, pior caso real) e fechando os grupos abertos | 0 (conferido no navegador; os grupos abertos continuam abertos) |
 | Itens lidos para recalcular a margem (orçamento de 1.000 itens) | todos | 0 |
-| Tempo até a tela mostrar o novo total (ambiente “VPS”) | — | — |
+| Tempo até a tela mostrar o novo total (ambiente “VPS”) | 1.148 ms (salva tudo e recarrega a página) | 157 ms |
 
 - **Trade-offs:** A atualização depende de uma ida ao servidor. Mostrar o valor antes (otimista) seria possível com o cálculo em inteiros compartilhado, mas foi descartado de propósito: recriaria uma prévia que pode divergir do salvo.
 - **Onde ver:** legada: o tratamento de `#prazo` e `#margem` em [`orcamento.js`](legacy/src/Budgets.Legacy.Web/wwwroot/js/orcamento.js) · nova: os campos de margem e prazo em [`BudgetPage.tsx`](apps/web/src/pages/BudgetPage.tsx), que viram uma operação no rascunho
@@ -569,6 +597,28 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 
 | | |
 |---|---|
+| **Ambiente “VPS”** | [`compose.vps.yaml`](compose.vps.yaml): toda a pilha em Docker, limitada a 4 CPUs e menos de 8 GB, como a VPS (Contabo, US Central). Infraestrutura com 2,5 CPUs (Postgres 1,25; Elasticsearch 0,75; cada Redis 0,25); cada versão com 1,5 (nova: API 1, worker 0,25, nginx 0,25; legada: API 0,75, front 0,75). As versões rodam uma de cada vez |
+| **Rede** | [Toxiproxy](bench/vps/rede.sh) entre o usuário e a aplicação: 75 ms em cada sentido (±10 ms), 10 Mbit/s de upload e 50 Mbit/s de download. **São suposições** para Brasil ↔ US Central, não medições do sistema real |
+| **Carga** | [k6](bench/k6/), dentro da rede do Docker (sem o encaminhamento de portas do Docker rootless no caminho). Modo “usuário”: 1 usuário, 20 rodadas. Modo “carga”: 16 usuários, 90 s, 0,5 s de pausa entre rodadas. Uma rodada de aquecimento (JIT do .NET, conexões) antes, descartada |
+| **O que cada script faz** | O que o navegador de cada versão faz: na legada, a página Razor, o jQuery chamando o front (`/front/...`), o “Salvar” carregando os grupos fechados (até 6 em paralelo), enviando o orçamento inteiro e recarregando a página; na nova, a API pelo nginx, uma operação por edição, o salvar sem corpo |
+| **Dados** | Gerador determinístico ([`packages/seed`](packages/seed/src/generate.ts)), semente fixa: 3.200 orçamentos e 426 mil itens; 5.500 produtos (un, m, L, kg); 2.200 clientes; 60% pequenos (até 60 itens), 30% médios (até 300), 9,5% grandes (12 grupos, 300 a 800 itens), 16 no pior caso real (15 grupos, 1.000 itens) e 1 de estresse sintético (5.000 itens, acima do real); 40% contêm uma versão anterior. Um teste trava o hash da saída |
+| **Legada** | Versão simplificada em ASP.NET Core Razor Pages + jQuery (`legacy/`), na stack original, publicada em Release, reproduzindo os 14 problemas, contra o mesmo Postgres e os mesmos dados |
+| **O que não está aqui** | A rede é suposta, não medida; arquivos estáticos (JS, CSS) não entram (as duas versões os servem em cache depois da primeira visita); nenhuma das duas comprime as respostas (ligar gzip ajudaria as duas, a legada mais); a máquina não é a VPS real |
+
+Reproduzir:
+
+```bash
+pnpm infra:up && pnpm seed:generate && pnpm legacy:seed full && pnpm v2:seed full
+pnpm --filter @budgets/web build
+dotnet publish legacy/src/Budgets.Legacy.Api -c Release -o bench/vps/out/legacy-api
+dotnet publish legacy/src/Budgets.Legacy.Web -c Release -o bench/vps/out/legacy-web
+docker compose -f compose.yaml -f compose.vps.yaml --profile vps up -d
+bash bench/vps/rede.sh
+bash bench/run.sh legada usuario && bash bench/run.sh nova usuario && python3 bench/relatorio.py usuario
+bash bench/run.sh legada carga && bash bench/run.sh nova carga && python3 bench/relatorio.py carga
+```
+
+---|---|
 | **Ambiente “VPS”** | ⟨Docker com `--cpus=4 --memory=8g`; latência e banda injetadas entre o cliente e a API⟩ |
 | **Calibração** | ⟨RTT medido de verdade do Brasil até uma VPS em US Central: X ms; CPU calibrada com benchmark⟩ |
 | **Carga** | ⟨k6, N usuários virtuais, cenários em `bench/`⟩ |
@@ -596,8 +646,8 @@ Reproduzir:
 | Redis | Rascunhos de edição (que seguram o bloqueio), cache e filas (BullMQ), em duas instâncias: `redis-data` e `redis-cache` | Duas instâncias porque cache pode ser despejado e rascunho não: LRU sem persistência num, `noeviction` + AOF no outro |
 | Elasticsearch | Listagem, filtros e autocomplete | Busca que ignora acentos, tolera erro de digitação e acha por prefixo, o que o `LIKE` não faz; alimentado por fila a partir de um outbox |
 | Vitest · Testing Library · Playwright | Testes unitários, de integração, de componentes e no navegador | Vitest roda a API e os pacotes em Node e a tela em DOM simulado; Playwright faz o fluxo principal num Chromium de verdade, contra o build de produção |
-| Docker Compose | Ambiente local e ambiente “VPS” | ⟨…⟩ |
-| Toxiproxy · k6 | Emular rede de produção e medir | ⟨…⟩ |
+| Docker Compose | Ambiente local e ambiente “VPS” | Sobe a infraestrutura igual para todo mundo; com o `compose.vps.yaml`, a pilha inteira com os limites da VPS |
+| Toxiproxy · k6 | Emular rede de produção e medir | Toxiproxy injeta latência e banda entre o usuário e a aplicação; k6 repete o que o navegador de cada versão faz, com 1 e com 16 usuários |
 | Sentry · Prometheus · pino | Erros, métricas e logs estruturados com ID de requisição | ⟨…⟩ |
 | ASP.NET Core Razor Pages · jQuery | Versão legada (reprodução) | Medir o “antes” na stack original, não numa imitação |
 
@@ -699,5 +749,5 @@ docs/adr/             decisões de arquitetura
 - [x] Tela nova (React + Vite + TanStack Query): login, listagem com busca, orçamento com grupos carregados por página e aviso de quem está editando
 - [x] Tela nova: edição em rascunho (cabeçalho, itens, inserir acima/abaixo, arrastar, grupos), barra com Salvar/Descartar e abas sincronizadas
 - [x] Tela nova: deploy sem cache velho (hash no nome, `no-cache` no `index.html`, aviso de versão nova) e testes de componentes e no navegador
-- [ ] Ambiente “VPS” e benchmark
+- [x] Ambiente “VPS” (4 CPUs, 8 GB, rede emulada) e benchmark com k6 das duas versões
 - [ ] README preenchido com os números

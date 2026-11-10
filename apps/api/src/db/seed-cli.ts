@@ -9,7 +9,7 @@ import { createElastic } from '../search/elastic.js';
 import { reindex } from '../search/reindex.js';
 import type { PrismaClient } from '../generated/prisma/client.js';
 import { createPrisma } from './prisma.js';
-import { databaseUrl, elasticsearchUrl } from './url.js';
+import { databaseUrl, elasticsearchUrl, redisCacheUrl } from './url.js';
 import { verifyTotals } from './verify.js';
 
 // Uso: pnpm v2:seed [small|full]  (as migrations rodam antes, no script da raiz)
@@ -56,7 +56,7 @@ try {
  * válido. Limpa o `redis-cache` (só cópias reconstruíveis). Sem ele no ar, segue em frente.
  */
 async function flushCache(): Promise<void> {
-  const redis = new Redis(`redis://127.0.0.1:${process.env.REDIS_CACHE_PORT ?? '6379'}`, {
+  const redis = new Redis(redisCacheUrl(), {
     lazyConnect: true,
     maxRetriesPerRequest: 0,
   });
