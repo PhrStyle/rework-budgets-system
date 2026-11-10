@@ -10,7 +10,8 @@
     "generate": "prisma generate",
     "seed": "tsx src/db/seed-cli.ts",
     "start": "tsx src/main.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "worker": "tsx src/worker/main.ts"
   },
   "dependencies": {
     "@budgets/budget-calc": "workspace:*",
@@ -22,6 +23,7 @@
     "@nestjs/platform-fastify": "12.4.0",
     "@prisma/adapter-pg": "7.10.1",
     "@prisma/client": "7.10.1",
+    "bullmq": "^6.7.2",
     "fastify": "5.12.8",
     "ioredis": "6.0.0",
     "nestjs-pino": "^5.3.1",

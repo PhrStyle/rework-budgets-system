@@ -4,6 +4,7 @@ import { bp, cents } from '@budgets/money';
 
 import { Database, toCents } from '../db/database.js';
 import type { Prisma } from '../generated/prisma/client.js';
+import { BUDGET_CHANGED } from '../queue/queues.js';
 import type { Draft } from './draft.js';
 
 type Tx = Prisma.TransactionClient;
@@ -171,6 +172,15 @@ export class DraftSaver {
     // 6. Totais do orçamento e, se ele estiver dentro de outro, do pai.
     const parentId = await this.recalculate(tx, budgetId);
     if (parentId !== null) await this.recalculate(tx, parentId);
+
+    // 7. Outbox, na mesma transação: se o commit acontecer, a busca vai saber; se não, não há
+    //    aviso de uma mudança que não existiu. O relay leva estas linhas para a fila.
+    await tx.outboxEvent.createMany({
+      data: [budgetId, ...(parentId === null ? [] : [parentId])].map((id) => ({
+        topic: BUDGET_CHANGED,
+        aggregateId: id,
+      })),
+    });
 
     return {
       createdIds: {

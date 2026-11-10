@@ -282,7 +282,7 @@ Uma edição vai só para o rascunho do usuário no Redis, e a API devolve os to
 - **Problema:** ⟨como era a busca⟩
 - **Impacto:** ⟨…⟩
 - **Solução:**
-  - ⟨Índice no Elasticsearch atualizado por evento (BullMQ)⟩
+  - **Índice atualizado por fila, sem perder nenhuma alteração:** o salvar grava um aviso numa tabela `outbox` **na mesma transação** da mudança; um relay leva os avisos para a fila (BullMQ, no `redis-data`) e um worker separado da API atualiza o índice, tentando de novo com espera crescente se o destino estiver fora do ar. Se o worker cair no meio de uma tarefa, a trava dela expira e outro worker a retoma. ⟨Destino Elasticsearch: etapa 7b⟩
   - ⟨Autocomplete de produtos (edge n-gram + fuzzy)⟩
 
 - **Resultado:**
@@ -292,8 +292,8 @@ Uma edição vai só para o rascunho do usuário no Redis, e a API devolve os to
 | Busca p95 | — | — |
 | Autocomplete p95 | — | — |
 
-- **Trade-offs:** ⟨Consistência eventual: a listagem pode atrasar alguns segundos; lag exposto como métrica.⟩
-- **Onde ver:** legada: [`OrcamentosController.Listar`](legacy/src/Budgets.Legacy.Api/Controllers/OrcamentosController.cs) e [`CatalogoController.Produtos`](legacy/src/Budgets.Legacy.Api/Controllers/CatalogoController.cs) (`ILIKE '%termo%'`) · ⟨nova: …⟩
+- **Trade-offs:** Consistência eventual: a busca reflete o salvar com algum atraso. Medido localmente: **67 a 429 ms**, dominado pelo intervalo em que o relay olha o outbox (500 ms; `LISTEN/NOTIFY` do Postgres reduziria isso). Com o worker desligado, o salvar continua respondendo (~15–25 ms) e os avisos esperam no outbox; ao religar, ele processa tudo. ⟨Atraso do Elasticsearch: etapa 7b⟩
+- **Onde ver:** legada: [`OrcamentosController.Listar`](legacy/src/Budgets.Legacy.Api/Controllers/OrcamentosController.cs) e [`CatalogoController.Produtos`](legacy/src/Budgets.Legacy.Api/Controllers/CatalogoController.cs) (`ILIKE '%termo%'`) · nova: outbox e relay em [`relay.ts`](apps/api/src/worker/relay.ts), worker em [`worker.ts`](apps/api/src/worker/worker.ts), testes em [`worker.test.ts`](apps/api/src/worker/worker.test.ts) (worker que morre no meio, destino fora do ar, dois relays ao mesmo tempo) · ⟨Elasticsearch: etapa 7b⟩
 
 ---
 
@@ -592,6 +592,7 @@ pnpm test
 | `pnpm legacy:web` | Sobe o front da legada em `http://127.0.0.1:5081` (precisa da API no ar); escolha um usuário e abra um orçamento |
 | `pnpm legacy:test` | Testes da legada (xUnit + Testcontainers; precisa de Docker) |
 | `pnpm v2:api` | Sobe a API nova em `http://127.0.0.1:3000/api` (porta em `API_PORT`), com logs de uma linha por requisição e o `x-request-id` na resposta |
+| `pnpm v2:worker` | Sobe o worker (processo separado da API): outbox → fila → busca, e a conferência de drift agendada (03:00) |
 | `pnpm v2:check` | Conferência de drift: recalcula do zero cada total guardado e aponta divergências |
 | `pnpm v2:seed full` | Aplica as migrations (Prisma) e carrega os dados no banco da versão nova (`budgets_v2`); relê tudo pelo Prisma e confere cada total com o gerador |
 
@@ -652,7 +653,8 @@ docs/adr/             decisões de arquitetura
 - [x] API nova: leitura (NestJS + Fastify): listagem, detalhe sem itens, itens por página, contratos em Zod e logs com o ID da requisição
 - [x] API nova: rascunho no Redis (segura o bloqueio), edição por delta e “Salvar alterações” gravando só o changeset
 - [x] API nova: cache no `redis-cache` com a versão na chave, métricas e conferência de drift
-- [ ] API nova: Elasticsearch e fila (BullMQ)
+- [x] API nova: outbox, fila (BullMQ) e worker separado, com a conferência de drift agendada
+- [ ] API nova: Elasticsearch (busca e autocomplete)
 - [ ] Front (React + Vite + TanStack Query)
 - [ ] Ambiente “VPS” e benchmark
 - [ ] README preenchido com os números

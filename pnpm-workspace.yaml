@@ -10,3 +10,5 @@ allowBuilds:
   cpu-features: false
   protobufjs: false
   ssh2: false
+  # Do BullMQ: acelerador nativo opcional do msgpackr; funciona sem compilar.
+  msgpackr-extract: false
