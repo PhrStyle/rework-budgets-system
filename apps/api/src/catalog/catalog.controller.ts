@@ -3,16 +3,23 @@ import { productSearchQuery } from '@budgets/contracts';
 import type { Product, ProductSearchQuery, Ref, Unit } from '@budgets/contracts';
 
 import { Database } from '../db/database.js';
+import { SearchService } from '../search/search.service.js';
 
 @Controller()
 export class CatalogController {
-  constructor(@Inject(Database) private readonly db: Database) {}
+  constructor(
+    @Inject(Database) private readonly db: Database,
+    @Inject(SearchService) private readonly search: SearchService,
+  ) {}
 
-  /** Autocomplete de produtos. Vai para o Elasticsearch (com tolerância a erro de digitação) na etapa 7. */
+  /** Autocomplete de produtos, pelo Elasticsearch; se ele falhar, pelo Postgres. */
   @Get('products')
   async products(
     @Query({ schema: productSearchQuery }) query: ProductSearchQuery,
   ): Promise<Product[]> {
+    const found = await this.search.products(query);
+    if (found) return found;
+
     const contains = { contains: query.search, mode: 'insensitive' } as const;
     const rows = await this.db.prisma.product.findMany({
       where: { OR: [{ name: contains }, { sku: contains }] },

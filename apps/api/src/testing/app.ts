@@ -5,6 +5,7 @@ import { Redis } from 'ioredis';
 import { createApp } from '../app.js';
 import { RedisData } from '../redis/redis.js';
 import { startTestDatabase } from './database.js';
+import { NO_ELASTICSEARCH } from './elasticsearch.js';
 import type { TestDatabase } from './database.js';
 import { startTestRedis } from './redis.js';
 import type { TestRedis } from './redis.js';
@@ -28,7 +29,7 @@ export interface TestApp {
 }
 
 /** A aplicação montada pela mesma `createApp` da produção, sobre Postgres e Redis descartáveis. */
-export async function startTestApp(): Promise<TestApp> {
+export async function startTestApp(options: { elasticsearchUrl?: string } = {}): Promise<TestApp> {
   const [db, redis, cache] = await Promise.all([
     startTestDatabase(),
     startTestRedis('data'),
@@ -36,6 +37,7 @@ export async function startTestApp(): Promise<TestApp> {
   ]);
   const app = await createApp({
     databaseUrl: db.url,
+    elasticsearchUrl: options.elasticsearchUrl ?? NO_ELASTICSEARCH,
     redisCacheUrl: cache.url(),
     redisDataUrl: redis.url(),
     draftTtlMs: 30 * 60 * 1000,

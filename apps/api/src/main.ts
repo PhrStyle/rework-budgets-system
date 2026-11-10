@@ -1,8 +1,9 @@
 import { createApp } from './app.js';
-import { databaseUrl } from './db/url.js';
+import { databaseUrl, elasticsearchUrl } from './db/url.js';
 
 const app = await createApp({
   databaseUrl: databaseUrl(),
+  elasticsearchUrl: elasticsearchUrl(),
   redisCacheUrl: `redis://127.0.0.1:${process.env.REDIS_CACHE_PORT ?? '6379'}`,
   redisDataUrl: `redis://127.0.0.1:${process.env.REDIS_DATA_PORT ?? '6380'}`,
   draftTtlMs: 30 * 60 * 1000,

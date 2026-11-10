@@ -19,6 +19,7 @@ import { Cache } from '../cache/cache.js';
 import { Database, toCents } from '../db/database.js';
 import type { DraftGroup, DraftItem } from '../drafts/draft.js';
 import { DraftStore } from '../drafts/draft.store.js';
+import { SearchService } from '../search/search.service.js';
 import type { Prisma } from '../generated/prisma/client.js';
 
 @Injectable()
@@ -29,10 +30,19 @@ export class BudgetsService {
     @Inject(Database) private readonly db: Database,
     @Inject(DraftStore) private readonly drafts: DraftStore,
     @Inject(Cache) private readonly cache: Cache,
+    @Inject(SearchService) private readonly search: SearchService,
   ) {}
 
-  /** Listagem com filtro. A busca por texto vai para o Elasticsearch na etapa 7. */
+  /** Listagem com filtro e busca, pelo Elasticsearch; se ele falhar, pelo Postgres. */
   async list(query: BudgetListQuery): Promise<Page<BudgetSummary>> {
+    return (await this.search.budgets(query)) ?? this.listFromPostgres(query);
+  }
+
+  /**
+   * A listagem pelo Postgres (`ILIKE`, como a legada): só como reserva. Não ignora acentos nem
+   * erros de digitação, mas mantém a tela funcionando com o Elasticsearch fora do ar.
+   */
+  private async listFromPostgres(query: BudgetListQuery): Promise<Page<BudgetSummary>> {
     const where: Prisma.BudgetWhereInput = {
       status: query.status,
       sellerId: query.sellerId,
