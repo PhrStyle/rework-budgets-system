@@ -6,7 +6,9 @@ using Microsoft.EntityFrameworkCore;
 // o jQuery chama o front (Razor Pages), que repassa para cá (problema 13).
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddDbContext<OrcamentosContext>(o => o.UseNpgsql(Conexao.DoAmbiente()));
+// ConnectionStrings:Legado (usada pelos testes) ou as variáveis do .env.
+builder.Services.AddDbContext<OrcamentosContext>(o =>
+    o.UseNpgsql(builder.Configuration.GetConnectionString("Legado") ?? Conexao.DoAmbiente()));
 builder.Services.Configure<OpcoesBloqueio>(builder.Configuration.GetSection("Bloqueio"));
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();

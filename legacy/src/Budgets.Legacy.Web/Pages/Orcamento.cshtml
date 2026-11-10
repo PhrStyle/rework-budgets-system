@@ -1,0 +1,99 @@
+@page "{id:int}"
+@model OrcamentoModel
+@using System.Globalization
+@{
+    ViewData["Title"] = Model.Detalhe is { } d ? $"Orçamento {d.Id}" : "Orçamento bloqueado";
+    var inv = CultureInfo.InvariantCulture;
+}
+@if (Model.Bloqueado is { } b)
+{
+    <div class="aviso">
+        <h2>Orçamento bloqueado</h2>
+        <p>Está aberto por <strong>@b.AbertoPor</strong> desde @b.AbertoEm?.ToLocalTime().ToString("HH:mm").</p>
+        <p class="muted sm">No sistema antigo, abrir um orçamento o marcava como “aberto” no banco; ninguém mais o abria até ser liberado ou expirar.</p>
+    </div>
+    <a asp-page="/Index">← Orçamentos</a>
+}
+else if (Model.Detalhe is { } o)
+{
+    <div id="orcamento" data-id="@o.Id" data-aberto-em="@o.AbertoEm?.ToString("O")">
+        <p class="sm" style="margin-bottom:14px"><a asp-page="/Index">← Orçamentos</a></p>
+        <div class="pagehead"><div>
+            <h2>Orçamento #@o.Id <span class="pill" style="--c:var(--warn)">aberto por você · bloqueado para os outros</span></h2>
+            <p class="muted">Arquitetura antiga: os itens vêm por grupo, cada alteração recalcula tudo no navegador e fica só na página até salvar, e salvar envia o orçamento inteiro.</p>
+        </div></div>
+
+        <div id="ultimo-salvar" class="info" hidden></div>
+
+        <div class="card">
+            <div class="hdr">
+                <label class="s5">Descrição<input id="descricao" value="@o.Descricao" /></label>
+                <label class="s3">Cliente<input value="@o.Cliente" disabled /></label>
+                <label class="s2">Vendedor<input value="@o.Vendedor" disabled /></label>
+                <label class="s2">Status
+                    <select id="status">
+                        @foreach (var s in new[] { "Rascunho", "Enviado", "Aprovado", "Perdido" })
+                        {
+                            <option selected="@(o.Status == s)">@s</option>
+                        }
+                    </select>
+                </label>
+                <label class="s2">Ajuste de prazo (%)<input id="prazo" type="number" step="0.5" value="@o.AjustePrazo.ToString(inv)" /></label>
+                <label class="s2">Margem de ajuste (%)<input id="margem" type="number" step="0.5" value="@o.Margem.ToString(inv)" /></label>
+                <label class="s3">Orçamento pai<input value="@(o.OrcamentoPaiId is int pai ? $"#{pai}" : "— (raiz)")" disabled /></label>
+                <label class="s5">Regra de cálculo<input value="float (JS) × decimal (C#), com ceil em todo cálculo como paliativo" disabled /></label>
+            </div>
+            <div class="stats">
+                <div><small>Subtotal na tela</small><b id="subtotal-previa">—</b></div>
+                <div><small>Total salvo (servidor, C#)</small><b>@Formato.Moeda(o.Total)</b></div>
+                <div class="tot"><small>Total na tela (prévia, JS)</small><b id="total-previa">—</b></div>
+            </div>
+        </div>
+
+        <div class="card barra" id="barra">
+            <span class="dot" id="pendentes-dot"></span>
+            <span id="pendentes">Nenhuma alteração pendente</span>
+            <span class="muted">· salvamento automático em <b id="autosave">05:00</b></span>
+            <span id="diagnostico" class="muted sm"></span>
+            <span class="sp"></span>
+            <button type="button" id="avancar" title="Simula a passagem de 5 minutos">Avançar 5 min</button>
+            <button type="button" id="salvar" class="primary">Salvar</button>
+        </div>
+
+        <div class="groups">
+            @foreach (var g in o.Grupos)
+            {
+                <div class="card group grupo" data-id="@g.Id" data-nome="@g.Nome" data-categoria="@g.Categoria" data-subtotal="@g.Subtotal.ToString(inv)">
+                    <div class="g-head grupo-cabecalho">
+                        <span class="chev">▶</span>
+                        <span class="nome-grupo">@g.Nome</span>
+                        <span class="cat">@g.Categoria</span>
+                        <span class="sp"></span>
+                        <span class="grupo-info muted sm">@g.QuantidadeItens itens · fechado (valor do servidor)</span>
+                        <span class="grupo-subtotal">@Formato.Moeda(g.Subtotal)</span>
+                    </div>
+                    <div class="g-body grupo-corpo"></div>
+                </div>
+            }
+        </div>
+
+        @if (o.Filhos.Count > 0)
+        {
+            <div class="card links">
+                <div class="lh"><h3>Orçamentos vinculados <span class="pill" style="--c:var(--accent)">versões anteriores</span></h3></div>
+                @foreach (var f in o.Filhos)
+                {
+                    <div class="lr filho" data-total="@f.Total.ToString(inv)">
+                        <span class="id">#@f.Id</span><span class="sp">@f.Descricao</span><b class="num">@Formato.Moeda(f.Total)</b>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+@section Scripts {
+    @* Sem asp-append-version, como no sistema original: depois de um deploy, o navegador continua
+       usando o orcamento.js antigo que está em cache (problema 9). *@
+    <script src="/js/orcamento.js"></script>
+}

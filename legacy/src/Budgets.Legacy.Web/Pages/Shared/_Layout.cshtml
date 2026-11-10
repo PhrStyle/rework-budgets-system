@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] · Orçamentos (legada)</title>
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+    <script>try{var t=localStorage.getItem('theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+</head>
+<body>
+    <header class="top"><div class="top-in">
+        <a class="brand" asp-page="/Index"><i></i>Orçamentos</a>
+        <span class="pill" style="--c:var(--warn)">versão legada · Razor + jQuery</span>
+        <span class="sp"></span>
+        @if (Context.Request.Cookies[Sessao.CookieNome] is { } nome)
+        {
+            <span class="muted sm">@nome · <a asp-page="/Login" asp-route-sair="1">trocar usuário</a></span>
+        }
+        <button type="button" class="ghost" id="tema" title="Alternar tema">◐ Tema</button>
+    </div></header>
+    <main role="main">
+        @RenderBody()
+    </main>
+
+    <script src="~/lib/jquery/dist/jquery.min.js"></script>
+    <script>
+        $('#tema').on('click', function () {
+            var r = document.documentElement;
+            var escuro = r.dataset.theme ? r.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+            r.dataset.theme = escuro ? 'light' : 'dark';
+            try { localStorage.setItem('theme', r.dataset.theme); } catch (e) {}
+        });
+    </script>
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

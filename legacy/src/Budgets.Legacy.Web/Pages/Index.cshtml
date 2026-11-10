@@ -1,0 +1,48 @@
+@page
+@model IndexModel
+@{
+    ViewData["Title"] = "Orçamentos";
+    var paginas = Math.Max(1, (int)Math.Ceiling(Model.Resultado.Total / 20.0));
+}
+<div class="pagehead"><div>
+    <h2>Orçamentos <span class="pill" style="--c:var(--warn)">legada</span></h2>
+    <p class="muted">@Model.Resultado.Total orçamentos · busca em @Model.Milissegundos ms (front → API → <code>LIKE '%termo%'</code> no banco)</p>
+</div></div>
+<form method="get" class="filters">
+    <input type="search" name="busca" value="@Model.Busca" placeholder="Buscar por descrição, cliente ou número" />
+    <select name="status">
+        <option value="">Todos os status</option>
+        @foreach (var s in new[] { "Rascunho", "Enviado", "Aprovado", "Perdido" })
+        {
+            <option selected="@(Model.Status == s)">@s</option>
+        }
+    </select>
+    <button class="primary">Buscar</button>
+</form>
+<div class="card">
+    <table>
+        <thead><tr><th>Nº</th><th>Descrição</th><th>Vendedor</th><th class="num">Total salvo</th><th>Status</th></tr></thead>
+        <tbody>
+            @foreach (var o in Model.Resultado.Itens)
+            {
+                <tr>
+                    <td class="id">#@o.Id</td>
+                    <td>
+                        <a asp-page="/Orcamento" asp-route-id="@o.Id">@o.Descricao</a>
+                        @if (o.Bloqueado) { <span class="pill" style="--c:var(--warn)">aberto por @o.AbertoPor</span> }
+                    </td>
+                    <td>@o.Vendedor</td>
+                    <td class="num">@Formato.Moeda(o.Total)</td>
+                    <td><span class="pill st-@o.Status">@o.Status</span></td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    <div class="pager">
+        <span class="muted sm">Página @Model.Pagina de @paginas</span>
+        <span>
+            @if (Model.Pagina > 1) { <a asp-route-busca="@Model.Busca" asp-route-status="@Model.Status" asp-route-pagina="@(Model.Pagina - 1)">← Anterior</a> }
+            @if (Model.Pagina < paginas) { <a asp-route-busca="@Model.Busca" asp-route-status="@Model.Status" asp-route-pagina="@(Model.Pagina + 1)">Próxima →</a> }
+        </span>
+    </div>
+</div>

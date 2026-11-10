@@ -18,7 +18,8 @@ public record FilhoResumo(int Id, string Descricao, decimal Total);
 public record OrcamentoDetalhe(
     int Id, string Descricao, int ClienteId, string Cliente, int VendedorId, string Vendedor, string Status,
     decimal AjustePrazo, decimal Margem, decimal Total, int? OrcamentoPaiId,
-    IReadOnlyList<GrupoResumo> Grupos, IReadOnlyList<FilhoResumo> Filhos);
+    IReadOnlyList<GrupoResumo> Grupos, IReadOnlyList<FilhoResumo> Filhos,
+    DateTime? AbertoEm);
 
 public record ItemDto(
     int? Id, int ProdutoId, string Nome, string Unidade, decimal Preco, decimal Quantidade, decimal Desconto, int Ordem, decimal Total);
