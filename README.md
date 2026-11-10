@@ -78,7 +78,7 @@ As duas versões implementam as mesmas regras; só muda **como**.
 | Status | Rascunho, Enviado, Aprovado, Perdido. Apenas organizacional: não muda cálculo nem permissões |
 | Edição | Um orçamento aberto por um usuário fica bloqueado para os demais usuários |
 | Grupos | Servem para organizar e carregar sob demanda. Vários grupos podem ser abertos, vistos e editados **ao mesmo tempo** |
-| Arredondamento | Comercial (meio centavo para cima), aplicado só onde há divisão (percentuais) |
+| Arredondamento | Comercial (meio centavo para cima), só onde há divisão: no item, depois do prazo e depois da margem. Cada linha exibida é um valor real e as linhas somam o total ([ADR 0003](docs/adr/0003-arredondamento-a-cada-passo.md)) |
 
 ---
 
@@ -184,7 +184,7 @@ flowchart LR
 | Tempo até a tela atualizar | — | — |
 
 - **Trade-offs:** ⟨Toda edição paga o RTT até o servidor; resposta otimista possível porque o cálculo é inteiro e determinístico.⟩
-- **Onde ver:** ⟨`apps/api/src/budgets/…`⟩ · ⟨teste: `…spec.ts`⟩
+- **Onde ver:** regra em [`packages/budget-calc`](packages/budget-calc/src/calc.ts) (`calcFromSubtotals`, `itemDelta`) · ⟨uso na API: `apps/api/…`⟩
 
 ---
 
@@ -273,7 +273,7 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
   - ⟨Editar um filho invalida o cache do pai⟩
 
 - **Resultado:** ⟨…⟩
-- **Onde ver:** ⟨…⟩
+- **Onde ver:** regra em [`packages/budget-calc`](packages/budget-calc/src/nesting.ts) (`validateNesting`, e `calcBudget` recusa neto) · ⟨uso na API: `apps/api/…`⟩
 
 ---
 
@@ -316,10 +316,10 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 
 | Métrica | Antes | Depois |
 |---|---|---|
-| Testes da regra de cálculo | 0 | — |
+| Testes da regra de cálculo | 0 | 58 (dinheiro + orçamento), 100% das linhas |
 | Cobertura de `packages/*` | — | — |
 
-- **Onde ver:** ⟨…⟩
+- **Onde ver:** [`packages/money`](packages/money/src) · [`packages/budget-calc`](packages/budget-calc/src) · casos compartilhados com a legada em [`fixtures/budget-cases.json`](fixtures/budget-cases.json)
 
 ---
 
@@ -444,14 +444,16 @@ Reproduzir:
 ## Estrutura do repositório
 
 ```
-apps/api            API NestJS
-apps/web            front React + Vite
-packages/money      dinheiro em inteiros
-packages/contracts  contratos da API compartilhados
-legacy/             versão legada em ASP.NET Core Razor Pages + jQuery
-bench/              k6 + perfis de rede (Toxiproxy)
-prototype/          protótipo visual (HTML único)
-docs/adr/           decisões de arquitetura
+apps/api              API NestJS
+apps/web              front React + Vite
+packages/money        dinheiro em inteiros
+packages/budget-calc  regras de cálculo do orçamento
+packages/contracts    contratos da API compartilhados
+fixtures/             casos de cálculo compartilhados (nova e legada)
+legacy/               versão legada em ASP.NET Core Razor Pages + jQuery
+bench/                k6 + perfis de rede (Toxiproxy)
+prototype/            protótipo visual (HTML único)
+docs/adr/             decisões de arquitetura
 ```
 
 ---
@@ -476,6 +478,7 @@ docs/adr/           decisões de arquitetura
 - [x] Protótipo visual (`prototype/index.html`)
 - [x] Repositório, CI e convenções
 - [x] `packages/money` + testes
+- [x] `packages/budget-calc` + casos compartilhados
 - [ ] Infra local (Docker Compose: Postgres, Redis, Elasticsearch)
 - [ ] Versão legada (ASP.NET Core Razor Pages + jQuery)
 - [ ] API nova: Postgres → Redis → Elasticsearch
