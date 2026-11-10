@@ -24,7 +24,9 @@
     "legacy:test": "dotnet test legacy/Budgets.Legacy.sln",
     "legacy:format": "dotnet format legacy/Budgets.Legacy.sln",
     "legacy:api": "set -a && . ./.env && set +a && dotnet run --project legacy/src/Budgets.Legacy.Api --urls http://127.0.0.1:5080",
-    "legacy:web": "dotnet run --project legacy/src/Budgets.Legacy.Web --urls http://127.0.0.1:5081"
+    "legacy:web": "dotnet run --project legacy/src/Budgets.Legacy.Web --urls http://127.0.0.1:5081",
+    "v2:migrate": "set -a && . ./.env && set +a && pnpm --filter @budgets/api exec prisma migrate deploy",
+    "v2:seed": "pnpm v2:migrate && set -a && . ./.env && set +a && pnpm --filter @budgets/api seed --"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -1,0 +1,123 @@
+// Modelo da versão nova. Dinheiro e percentuais em inteiros (packages/money):
+//   *Cents  centavos           R$ 12,34 = 1234
+//   *Bp     pontos-base        7,5%     = 750
+//   quantity centésimos        2,5 m    = 250
+// Preço e quantidade cabem em Int; totais podem passar de 2^31 centavos (R$ 21 milhões), então são BigInt.
+// Os limites de cada campo também ficam no banco, como CHECK (ver a migration inicial).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum BudgetStatus {
+  Rascunho
+  Enviado
+  Aprovado
+  Perdido
+}
+
+model Seller {
+  id      Int      @id
+  name    String
+  budgets Budget[]
+
+  @@map("sellers")
+}
+
+model Client {
+  id      Int      @id
+  name    String
+  budgets Budget[]
+
+  @@map("clients")
+}
+
+model Product {
+  id         Int    @id
+  sku        String @unique
+  name       String
+  category   String
+  /// un, m, l ou kg
+  unit       String
+  priceCents Int    @map("price_cents")
+  items      Item[]
+
+  @@map("products")
+}
+
+model Budget {
+  id          Int          @id @default(autoincrement())
+  description String
+  clientId    Int          @map("client_id")
+  client      Client       @relation(fields: [clientId], references: [id])
+  sellerId    Int          @map("seller_id")
+  seller      Seller       @relation(fields: [sellerId], references: [id])
+  status      BudgetStatus @default(Rascunho)
+  /// Ajuste de prazo, de −10000 a 10000
+  prazoBp     Int          @map("prazo_bp")
+  /// Margem, de 0 a 10000
+  margemBp    Int          @map("margem_bp")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  /// Orçamento que contém este (no máximo 1 nível).
+  parentId Int?     @map("parent_id")
+  parent   Budget?  @relation("BudgetChildren", fields: [parentId], references: [id])
+  children Budget[] @relation("BudgetChildren")
+
+  /// Totais guardados, recalculados na mesma transação de cada gravação: a listagem não lê itens.
+  groupsTotalCents   BigInt @map("groups_total_cents")
+  childrenTotalCents BigInt @map("children_total_cents")
+  totalCents         BigInt @map("total_cents")
+
+  groups Group[]
+
+  @@index([parentId])
+  @@index([createdAt(sort: Desc)])
+  @@map("budgets")
+}
+
+model Group {
+  id            Int    @id @default(autoincrement())
+  budgetId      Int    @map("budget_id")
+  budget        Budget @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  name          String
+  category      String
+  /// Ordem com folga (1024, 2048…): inserir entre dois grupos não renumera os outros.
+  position      Int
+  /// Sobe a cada gravação deste grupo; detecta conflito sem bloquear os outros grupos.
+  version       Int    @default(1)
+  subtotalCents BigInt @map("subtotal_cents")
+  itemCount     Int    @map("item_count")
+  items         Item[]
+
+  @@index([budgetId, position])
+  @@map("groups")
+}
+
+model Item {
+  id         Int     @id @default(autoincrement())
+  groupId    Int     @map("group_id")
+  group      Group   @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  productId  Int     @map("product_id")
+  product    Product @relation(fields: [productId], references: [id])
+  /// Nome, unidade e preço copiados do catálogo: o catálogo muda, o orçamento não.
+  name       String
+  unit       String
+  priceCents Int     @map("price_cents")
+  /// Centésimos da unidade
+  quantity   Int
+  discountBp Int     @map("discount_bp")
+  /// Ordem com folga, como nos grupos: inserir acima/abaixo não renumera a lista.
+  position   Int
+  totalCents BigInt  @map("total_cents")
+
+  @@index([groupId, position])
+  @@index([productId])
+  @@map("items")
+}

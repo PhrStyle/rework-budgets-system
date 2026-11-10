@@ -1,0 +1,27 @@
+{
+  "name": "@budgets/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "API da versão nova: NestJS, Prisma (Postgres) e rascunho de edição no Redis.",
+  "scripts": {
+    "generate": "prisma generate",
+    "seed": "tsx src/db/seed-cli.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@budgets/budget-calc": "workspace:*",
+    "@budgets/money": "workspace:*",
+    "@budgets/seed": "workspace:*",
+    "@prisma/adapter-pg": "7.10.1",
+    "@prisma/client": "7.10.1",
+    "pg": "^8.23.1",
+    "prisma": "7.10.1"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "12.2.1",
+    "@types/node": "^22.20.5",
+    "@types/pg": "^8.23.1",
+    "tsx": "^4.23.15"
+  }
+}

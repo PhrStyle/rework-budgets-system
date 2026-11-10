@@ -5,7 +5,14 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['**/dist/**', '**/coverage/**', 'prototype/**', 'legacy/**'],
+    ignores: [
+      '**/dist/**',
+      '**/coverage/**',
+      'prototype/**',
+      'legacy/**',
+      // client gerado pelo Prisma (prisma generate)
+      'apps/api/src/generated/**',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,

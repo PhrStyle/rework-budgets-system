@@ -7,3 +7,5 @@ prototype/
 *.md
 # versão legada (C#): formatada pelo dotnet format
 legacy/
+# client gerado pelo Prisma (prisma generate)
+apps/api/src/generated/

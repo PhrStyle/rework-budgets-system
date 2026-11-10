@@ -30,8 +30,11 @@ jobs:
 
       # Falha se package.json e pnpm-lock.yaml não baterem, em vez de atualizar o lockfile.
       - run: pnpm install --frozen-lockfile
+      # O client do Prisma é gerado a partir do schema e não vai para o git.
+      - run: pnpm --filter @budgets/api generate
       - run: pnpm lint
       - run: pnpm typecheck
+      # Os testes da API sobem um Postgres descartável (Testcontainers) no Docker do runner.
       - run: pnpm test:coverage
 
   legacy:
