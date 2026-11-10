@@ -285,7 +285,7 @@ Uma edição vai só para o rascunho do usuário no `redis-data`, e a API devolv
 | Armazenamento no navegador | grupos inteiros no `localStorage` | 0 B |
 | Taxa de acerto no benchmark de carga (Prometheus) | não se aplica | detalhe do orçamento **89%**; itens do grupo perto de 0%, porque cada rodada do teste **salva** o grupo (muda a versão e a chave). Com uso real, em que se lê muito mais do que se salva, a taxa dos itens sobe; não medida com usuários reais |
 
-- **Trade-offs:** O cache guarda o grupo inteiro e pagina em memória: um grupo enorme custa uma chave grande (357 itens ≈ 60 KB no perfil de estresse). O detalhe ainda faz uma consulta curta ao Postgres para saber a versão (a hora da última gravação) antes de ir ao cache. Localmente o ganho é pequeno em valor absoluto; ele importa com carga e com o banco mais longe, o que a etapa 9 mede.
+- **Trade-offs:** O cache guarda o grupo inteiro e pagina em memória: um grupo enorme custa uma chave grande (357 itens ≈ 60 KB no perfil de estresse). O detalhe ainda faz uma consulta curta ao Postgres para saber a versão (a hora da última gravação) antes de ir ao cache. Localmente o ganho é pequeno em valor absoluto; com carga e com o banco mais longe ele tende a crescer, mas não foi medido com e sem cache no ambiente “VPS” (lá foi medida só a taxa de acerto).
 - **Onde ver:** legada: `carregarItens()` em [`orcamento.js`](legacy/src/Budgets.Legacy.Web/wwwroot/js/orcamento.js). Reproduzido: como o salvar apaga e regrava os grupos com ids novos, o `localStorage` fica com chaves de grupos que não existem mais (15 chaves órfãs depois de um salvamento no pior caso) · nova: [`cache.ts`](apps/api/src/cache/cache.ts), uso em [`budgets.service.ts`](apps/api/src/budgets/budgets.service.ts), testes em [`cache.test.ts`](apps/api/src/cache/cache.test.ts) (inclusive com o Redis derrubado no meio), métricas em `GET /api/metrics`
 
 ---
@@ -411,7 +411,7 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 | Quantidade inválida para a unidade | aceita: o campo usa 2 casas para qualquer unidade (“1,5 un” passava) | marcada no campo, nada enviado |
 | Mover um item | DOM, e o orçamento inteiro reenviado ao salvar | 1 operação no rascunho |
 
-- **Trade-offs:** Cada edição é uma ida ao servidor (~9 ms localmente, medido na etapa 5); sem atualização otimista, de propósito: mostrar um valor calculado no navegador antes da resposta recriaria a prévia que diverge do salvo. O efeito com a rede da VPS é medido na etapa 9.
+- **Trade-offs:** Cada edição é uma ida ao servidor: ~9 ms na máquina local e ~157 ms com a rede da VPS emulada (ver [Antiga × nova](#antiga--nova-números)). Sem atualização otimista, de propósito: mostrar um valor calculado no navegador antes da resposta recriaria a prévia que diverge do salvo.
 - **Onde ver:** legada: `recalcular()` em [`orcamento.js`](legacy/src/Budgets.Legacy.Web/wwwroot/js/orcamento.js) · nova: [`GroupCard.tsx`](apps/web/src/components/GroupCard.tsx) (linhas editáveis, inserir, arrastar), [`Field.tsx`](apps/web/src/components/Field.tsx) (grava ao sair, valida com `packages/money`), [`draft.ts`](apps/web/src/api/draft.ts) (operações, ordem das respostas, abas)
 
 ---
@@ -458,7 +458,7 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 | Cache do `index.html` | não se aplica (HTML gerado pelo servidor a cada visita) | `no-cache`: sempre revalida |
 | Erros depois do deploy | só quando o usuário reclamava | no Sentry, com a versão do build em cada erro: dá para ver “começou na versão X” (conferido com o GlitchTip local; a contagem real depende de usuários reais) |
 
-- **Trade-offs:** Uma SPA separa front e back em dois artefatos, o que **aumenta** o risco de descompasso de versões se nada for feito; a mitigação precisa existir desde o primeiro deploy. O aviso depende de o usuário clicar: uma aba esquecida aberta continua na versão antiga até lá (ela só não quebra se a API se mantiver compatível). Os cabeçalhos de cache estão no `vite preview`; na etapa 9, o nginx da “VPS” repete as mesmas regras.
+- **Trade-offs:** Uma SPA separa front e back em dois artefatos, o que **aumenta** o risco de descompasso de versões se nada for feito; a mitigação precisa existir desde o primeiro deploy. O aviso depende de o usuário clicar: uma aba esquecida aberta continua na versão antiga até lá (ela só não quebra se a API se mantiver compatível). As mesmas regras de cache valem no `vite preview` e no nginx do ambiente “VPS” ([`nginx.conf`](infra/web/nginx.conf)).
 - **Onde ver:** legada: [`Program.cs` do front](legacy/src/Budgets.Legacy.Web/Program.cs) (scripts com cache de 7 dias) e a tag do script em [`Orcamento.cshtml`](legacy/src/Budgets.Legacy.Web/Pages/Orcamento.cshtml), sem versão no nome. O próprio ASP.NET já oferecia a correção (`asp-append-version`), que o sistema não usava · nova: [`vite.config.ts`](apps/web/vite.config.ts) (versão, `version.json` e cabeçalhos), [`version.ts`](apps/web/src/version.ts) e [`NewVersion.tsx`](apps/web/src/components/NewVersion.tsx); testes em [`editar.spec.ts`](apps/web/e2e/editar.spec.ts) (cabeçalhos no navegador) e [`NewVersion.test.tsx`](apps/web/src/components/NewVersion.test.tsx)
 
 ---
@@ -544,7 +544,7 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 | Métrica | Antes | Depois |
 |---|---|---|
 | Servidores por chamada | 2 | 1 |
-| Carregar um grupo de 63 itens (rede local) | 21 ms, dos quais 8 ms só no salto front → API | ~5 ms, só a API, sem salto (etapa 5) |
+| Carregar um grupo de 63 itens (rede local) | 21 ms, dos quais 8 ms só no salto front → API | ~5 ms, só a API, sem salto (medido na máquina local) |
 | Serializações por chamada | 2 | 1 |
 | Lugares que definem cada endpoint | 2 | 1 |
 | Tempo de uma edição (ambiente “VPS”) | salvar: 1.136 ms (39 requisições por rodada, cada uma por front e API) | 170 ms (10 requisições por rodada, direto na API) |
@@ -698,7 +698,7 @@ docs/adr/             decisões de arquitetura
 
 ## Status
 
-**Pronto =** as duas versões funcionando, com os 14 problemas reproduzidos na legada e resolvidos na nova, medidos e documentados.
+**Pronto.** As duas versões funcionam, com os 14 problemas reproduzidos na legada e resolvidos na nova, medidos e documentados. O que ficou de fora está listado no fim desta seção.
 
 - [x] Protótipo visual (`prototype/index.html`)
 - [x] Repositório, CI e convenções
