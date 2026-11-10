@@ -46,50 +46,49 @@ $(function () {
   }
 
   function linha(item) {
-    var $l = $('<tr class="item" draggable="true">')
+    var $l = $('<div class="it item" draggable="true">')
       .attr('data-produto', item.produtoId)
       .attr('data-unidade', item.unidade)
       .attr('data-nome', item.nome);
-    $l.append('<td class="arrastar" title="Arrastar para reordenar">⠿</td>');
-    $l.append($('<td class="nome">').text(item.nome).append(
-      '<button type="button" class="inserir acima" title="Inserir produto acima">+</button>' +
-      '<button type="button" class="inserir abaixo" title="Inserir produto abaixo">+</button>'));
-    $l.append($('<td>').append($('<input type="number" step="0.01" min="0.01" class="form-control form-control-sm qtd">').val(item.quantidade)));
-    $l.append($('<td>').append($('<input type="number" step="0.5" min="0" max="100" class="form-control form-control-sm desconto">').val(item.desconto)));
-    $l.append($('<td class="text-end unitario">').text(moeda(item.preco)));
-    $l.append('<td class="text-end total"></td>');
-    $l.append('<td><button type="button" class="btn btn-sm btn-link text-danger remover" title="Remover">✕</button></td>');
+    $l.append('<span class="drag" title="Arrastar para reordenar">⠿</span>');
+    $l.append($('<span class="nome">').text(item.nome));
+    $l.append($('<input type="number" step="0.01" min="0.01" class="qtd">').val(item.quantidade));
+    $l.append($('<input type="number" step="0.5" min="0" max="100" class="desconto">').val(item.desconto));
+    $l.append($('<span class="num muted unitario">').text(moeda(item.preco)));
+    $l.append('<span class="num total"></span>');
+    $l.append('<button type="button" class="remover" title="Remover">✕</button>');
+    $l.append('<button type="button" class="ins inserir acima" title="Inserir produto acima">+</button>' +
+      '<button type="button" class="ins inserir abaixo" title="Inserir produto abaixo">+</button>');
     return $l;
   }
 
-  function buscaProduto() {
-    return $('<div class="busca-produto position-relative">' +
-      '<input class="form-control form-control-sm" placeholder="Buscar produto pelo nome ou SKU…">' +
-      '<ul class="sugestoes list-group"></ul></div>');
+  function buscaProduto(classe) {
+    return $('<div class="add busca-produto ' + (classe || '') + '">' +
+      '<input placeholder="Buscar produto pelo nome ou SKU…">' +
+      '<ul class="sugestoes"></ul></div>');
   }
 
   $tela.on('click', '.grupo-cabecalho', function () {
     var $g = $(this).closest('.grupo');
     var $corpo = $g.find('.grupo-corpo');
-    if ($g.data('carregado')) { $corpo.toggle(); return; }
+    $g.toggleClass('open');
+    if ($g.data('carregado') || !$g.hasClass('open')) return;
 
-    $corpo.show().html('<p class="text-muted small p-3 mb-0">Carregando todos os itens do grupo…</p>');
+    $corpo.html('<p class="carregando">Carregando todos os itens do grupo…</p>');
     var inicio = performance.now();
     carregarItens($g.data('id')).then(function (itens, doCache) {
-      var $tbody = $('<tbody>');
-      $.each(itens, function (_, item) { $tbody.append(linha(item)); });
-      $corpo.html('<table class="table table-sm align-middle mb-0"><thead><tr>' +
-        '<th></th><th>Produto</th><th style="width:110px">Qtd</th><th style="width:100px">Desc. %</th>' +
-        '<th class="text-end">Unitário</th><th class="text-end">Total</th><th></th></tr></thead></table>');
-      $corpo.find('table').append($tbody);
-      $corpo.append($('<div class="p-2">').append(buscaProduto()));
+      var $itens = $('<div class="itens">');
+      $.each(itens, function (_, item) { $itens.append(linha(item)); });
+      $corpo.html('<div class="it h"><span></span><span>Produto</span><span class="num">Qtd</span>' +
+        '<span class="num">Desc. %</span><span class="num">Unitário</span><span class="num">Total</span><span></span></div>');
+      $corpo.append($itens).append(buscaProduto());
       $g.data('carregado', true);
       recalcular();
       $g.find('.grupo-info').text(itens.length + ' itens · ' +
         (doCache === true ? 'do localStorage, sem validar' : 'do servidor') + ' · ' +
         Math.round(performance.now() - inicio) + ' ms');
     }, function () {
-      $corpo.html('<p class="text-danger small p-3 mb-0">Não foi possível carregar o grupo.</p>');
+      $corpo.html('<p class="carregando">Não foi possível carregar o grupo.</p>');
     });
   });
 
@@ -102,7 +101,7 @@ $(function () {
       var $g = $(this);
       if (!$g.data('carregado')) { subtotal += parseFloat($g.data('subtotal')); return; } // fechado: vale o do servidor
       var soma = 0;
-      $g.find('tr.item').each(function () {
+      $g.find('.item').each(function () {
         var $l = $(this);
         var qtd = parseFloat($l.find('.qtd').val()) || 0;
         var desconto = parseFloat($l.find('.desconto').val()) || 0;
@@ -128,23 +127,23 @@ $(function () {
 
   function marcarAlterado() {
     pendentes++;
-    $('#pendentes').text(pendentes + (pendentes === 1 ? ' alteração' : ' alterações') + ' só nesta página (navegador)');
+    $('#pendentes-dot').addClass('warn');
+    $('#pendentes').html('<b>' + pendentes + (pendentes === 1 ? ' alteração' : ' alterações') + '</b> só nesta página (navegador)');
   }
 
   $tela.on('change', '.qtd, .desconto', function () { recalcular(); marcarAlterado(); });
 
   $tela.on('click', '.remover', function () {
-    $(this).closest('tr').remove();
+    $(this).closest('.item').remove();
     recalcular();
     marcarAlterado();
   });
 
   // ---------- inserir produto acima ou abaixo de uma linha ----------
   $tela.on('click', '.inserir', function () {
-    $tela.find('tr.linha-busca').remove();
-    var $alvo = $(this).closest('tr');
-    var $linhaBusca = $('<tr class="linha-busca"><td colspan="7"></td></tr>');
-    $linhaBusca.find('td').append(buscaProduto());
+    $tela.find('.linha-busca').remove();
+    var $alvo = $(this).closest('.item');
+    var $linhaBusca = buscaProduto('inline linha-busca');
     if ($(this).hasClass('acima')) $alvo.before($linhaBusca); else $alvo.after($linhaBusca);
     $linhaBusca.find('input').trigger('focus');
   });
@@ -153,7 +152,7 @@ $(function () {
   var esperaBusca = null;
   $tela.on('keyup', '.busca-produto input', function (e) {
     var $busca = $(this).closest('.busca-produto');
-    if (e.key === 'Escape') { $busca.closest('tr.linha-busca').remove(); return; }
+    if (e.key === 'Escape') { if ($busca.hasClass('linha-busca')) $busca.remove(); return; }
     var termo = $(this).val().trim();
     clearTimeout(esperaBusca);
     if (termo.length < 2) { $busca.find('.sugestoes').empty(); return; }
@@ -161,7 +160,7 @@ $(function () {
       $.getJSON('/front/produtos', { busca: termo }).then(function (produtos) {
         var $lista = $busca.find('.sugestoes').empty();
         $.each(produtos, function (_, p) {
-          $('<li class="list-group-item list-group-item-action small">')
+          $('<li>')
             .text(p.nome + ' · ' + p.sku + ' · ' + moeda(p.preco) + '/' + p.unidade)
             .data('produto', p)
             .appendTo($lista);
@@ -173,11 +172,11 @@ $(function () {
   $tela.on('click', '.sugestoes li', function () {
     var p = $(this).data('produto');
     var $nova = linha({ produtoId: p.id, nome: p.nome, unidade: p.unidade, preco: p.preco, quantidade: 1, desconto: 0 });
-    var $linhaBusca = $(this).closest('tr.linha-busca');
+    var $linhaBusca = $(this).closest('.linha-busca');
     if ($linhaBusca.length) {
       $linhaBusca.replaceWith($nova);
     } else {
-      $(this).closest('.grupo-corpo').find('tbody').append($nova);
+      $(this).closest('.grupo-corpo').find('.itens').append($nova);
       $(this).closest('.busca-produto').find('input').val('');
       $(this).closest('.sugestoes').empty();
     }
@@ -187,11 +186,11 @@ $(function () {
 
   // ---------- reordenar arrastando (HTML5) ----------
   var $arrastando = null;
-  $tela.on('dragstart', 'tr.item', function () { $arrastando = $(this).addClass('arrastando'); });
-  $tela.on('dragend', 'tr.item', function () { $(this).removeClass('arrastando'); $tela.find('.sobre').removeClass('sobre'); });
-  $tela.on('dragover', 'tr.item', function (e) { e.preventDefault(); $(this).addClass('sobre'); });
-  $tela.on('dragleave', 'tr.item', function () { $(this).removeClass('sobre'); });
-  $tela.on('drop', 'tr.item', function (e) {
+  $tela.on('dragstart', '.item', function () { $arrastando = $(this).addClass('arrastando'); });
+  $tela.on('dragend', '.item', function () { $(this).removeClass('arrastando'); $tela.find('.sobre').removeClass('sobre'); });
+  $tela.on('dragover', '.item', function (e) { e.preventDefault(); $(this).addClass('sobre'); });
+  $tela.on('dragleave', '.item', function () { $(this).removeClass('sobre'); });
+  $tela.on('drop', '.item', function (e) {
     e.preventDefault();
     if ($arrastando && $arrastando[0] !== this && $(this).parent()[0] === $arrastando.parent()[0]) {
       $(this).before($arrastando);
@@ -202,7 +201,7 @@ $(function () {
 
   // ---------- salvar: o orçamento INTEIRO, e depois recarregar a página ----------
   function itensDaTela($g) {
-    return $g.find('tr.item').map(function (j) {
+    return $g.find('.item').map(function (j) {
       var $l = $(this);
       return {
         id: null, produtoId: +$l.attr('data-produto'), nome: $l.attr('data-nome'), unidade: $l.attr('data-unidade'),
@@ -263,7 +262,7 @@ $(function () {
   $('#prazo, #margem').on('change', function () {
     recalcular();
     marcarAlterado();
-    $('#pendentes').text('Mudança global: salvando o orçamento inteiro para o servidor recalcular…');
+    $('#pendentes').html('<b>Mudança global:</b> salvando o orçamento inteiro para o servidor recalcular…');
     salvar(this.id === 'prazo' ? 'mudança no ajuste de prazo' : 'mudança na margem');
   });
 
@@ -289,7 +288,7 @@ $(function () {
   if (ultimo) {
     sessionStorage.removeItem('legado:ultimoSalvar');
     var u = JSON.parse(ultimo);
-    $('#ultimo-salvar').removeClass('d-none').text(
+    $('#ultimo-salvar').prop('hidden', false).text(
       'Último salvamento (' + u.motivo + '): enviou o orçamento inteiro, ' + u.itens + ' itens e ' + u.kb +
       ' KB, em ' + u.ms + ' ms (' + u.servidor + ' ms no servidor regravando tudo). A página recarregou com o total do servidor.');
   }

@@ -7,81 +7,86 @@
 }
 @if (Model.Bloqueado is { } b)
 {
-    <div class="alert alert-warning">
-        <h1 class="h5">Orçamento bloqueado</h1>
-        <p class="mb-1">Está aberto por <strong>@b.AbertoPor</strong> desde @b.AbertoEm?.ToLocalTime().ToString("HH:mm").</p>
-        <p class="mb-0 small">No sistema antigo, abrir um orçamento o marcava como “aberto” no banco; ninguém mais o abria até ser liberado ou expirar.</p>
+    <div class="aviso">
+        <h2>Orçamento bloqueado</h2>
+        <p>Está aberto por <strong>@b.AbertoPor</strong> desde @b.AbertoEm?.ToLocalTime().ToString("HH:mm").</p>
+        <p class="muted sm">No sistema antigo, abrir um orçamento o marcava como “aberto” no banco; ninguém mais o abria até ser liberado ou expirar.</p>
     </div>
-    <a asp-page="/Index">Voltar</a>
+    <a asp-page="/Index">← Orçamentos</a>
 }
 else if (Model.Detalhe is { } o)
 {
     <div id="orcamento" data-id="@o.Id" data-aberto-em="@o.AbertoEm?.ToString("O")">
-        <div class="d-flex justify-content-between align-items-end mb-2">
-            <h1 class="h4 mb-0">Orçamento @o.Id <span class="badge bg-secondary">aberto por você · bloqueado para os outros</span></h1>
-            <a asp-page="/Index">Voltar à lista</a>
-        </div>
+        <p class="sm" style="margin-bottom:14px"><a asp-page="/Index">← Orçamentos</a></p>
+        <div class="pagehead"><div>
+            <h2>Orçamento #@o.Id <span class="pill" style="--c:var(--warn)">aberto por você · bloqueado para os outros</span></h2>
+            <p class="muted">Arquitetura antiga: os itens vêm por grupo, cada alteração recalcula tudo no navegador e fica só na página até salvar, e salvar envia o orçamento inteiro.</p>
+        </div></div>
 
-        <div id="ultimo-salvar" class="alert alert-info small d-none"></div>
+        <div id="ultimo-salvar" class="info" hidden></div>
 
-        <div class="card mb-3"><div class="card-body">
-            <div class="row g-2">
-                <div class="col-md-6"><label class="form-label small">Descrição</label><input id="descricao" class="form-control" value="@o.Descricao" /></div>
-                <div class="col-md-3"><label class="form-label small">Cliente</label><input class="form-control" value="@o.Cliente" disabled /></div>
-                <div class="col-md-3"><label class="form-label small">Vendedor</label><input class="form-control" value="@o.Vendedor" disabled /></div>
-                <div class="col-md-3">
-                    <label class="form-label small">Status</label>
-                    <select id="status" class="form-select">
+        <div class="card">
+            <div class="hdr">
+                <label class="s5">Descrição<input id="descricao" value="@o.Descricao" /></label>
+                <label class="s3">Cliente<input value="@o.Cliente" disabled /></label>
+                <label class="s2">Vendedor<input value="@o.Vendedor" disabled /></label>
+                <label class="s2">Status
+                    <select id="status">
                         @foreach (var s in new[] { "Rascunho", "Enviado", "Aprovado", "Perdido" })
                         {
                             <option selected="@(o.Status == s)">@s</option>
                         }
                     </select>
-                </div>
-                <div class="col-md-3"><label class="form-label small">Ajuste de prazo (%)</label><input id="prazo" type="number" step="0.5" class="form-control" value="@o.AjustePrazo.ToString(inv)" /></div>
-                <div class="col-md-3"><label class="form-label small">Margem (%)</label><input id="margem" type="number" step="0.5" class="form-control" value="@o.Margem.ToString(inv)" /></div>
+                </label>
+                <label class="s2">Ajuste de prazo (%)<input id="prazo" type="number" step="0.5" value="@o.AjustePrazo.ToString(inv)" /></label>
+                <label class="s2">Margem de ajuste (%)<input id="margem" type="number" step="0.5" value="@o.Margem.ToString(inv)" /></label>
+                <label class="s3">Orçamento pai<input value="@(o.OrcamentoPaiId is int pai ? $"#{pai}" : "— (raiz)")" disabled /></label>
+                <label class="s5">Regra de cálculo<input value="float (JS) × decimal (C#), com ceil em todo cálculo como paliativo" disabled /></label>
             </div>
-            <div class="row mt-3 text-center">
-                <div class="col"><div class="small text-muted">Subtotal na tela</div><div id="subtotal-previa" class="fw-semibold">—</div></div>
-                <div class="col"><div class="small text-muted">Total na tela (prévia, JS)</div><div id="total-previa" class="fs-5 fw-semibold">—</div></div>
-                <div class="col"><div class="small text-muted">Total salvo (servidor, C#)</div><div class="fs-5">@Formato.Moeda(o.Total)</div></div>
+            <div class="stats">
+                <div><small>Subtotal na tela</small><b id="subtotal-previa">—</b></div>
+                <div><small>Total salvo (servidor, C#)</small><b>@Formato.Moeda(o.Total)</b></div>
+                <div class="tot"><small>Total na tela (prévia, JS)</small><b id="total-previa">—</b></div>
             </div>
-        </div></div>
-
-        <div id="barra" class="d-flex align-items-center gap-3 p-2 mb-3 border rounded bg-light small">
-            <span id="pendentes">Nenhuma alteração pendente</span>
-            <span>· salvamento automático em <strong id="autosave">05:00</strong></span>
-            <span id="diagnostico" class="text-muted"></span>
-            <span class="flex-grow-1"></span>
-            <button type="button" id="avancar" class="btn btn-sm btn-outline-secondary" title="Simula a passagem de 5 minutos">Avançar 5 min</button>
-            <button type="button" id="salvar" class="btn btn-sm btn-primary">Salvar</button>
         </div>
 
-        @foreach (var g in o.Grupos)
-        {
-            <div class="grupo card mb-2" data-id="@g.Id" data-nome="@g.Nome" data-categoria="@g.Categoria" data-subtotal="@g.Subtotal.ToString(inv)">
-                <div class="grupo-cabecalho card-header d-flex gap-3 align-items-center">
-                    <strong>@g.Nome</strong>
-                    <span class="text-muted small">@g.Categoria</span>
-                    <span class="grupo-info text-muted small">@g.QuantidadeItens itens · fechado (valor do servidor)</span>
-                    <span class="flex-grow-1"></span>
-                    <strong class="grupo-subtotal">@Formato.Moeda(g.Subtotal)</strong>
+        <div class="card barra" id="barra">
+            <span class="dot" id="pendentes-dot"></span>
+            <span id="pendentes">Nenhuma alteração pendente</span>
+            <span class="muted">· salvamento automático em <b id="autosave">05:00</b></span>
+            <span id="diagnostico" class="muted sm"></span>
+            <span class="sp"></span>
+            <button type="button" id="avancar" title="Simula a passagem de 5 minutos">Avançar 5 min</button>
+            <button type="button" id="salvar" class="primary">Salvar</button>
+        </div>
+
+        <div class="groups">
+            @foreach (var g in o.Grupos)
+            {
+                <div class="card group grupo" data-id="@g.Id" data-nome="@g.Nome" data-categoria="@g.Categoria" data-subtotal="@g.Subtotal.ToString(inv)">
+                    <div class="g-head grupo-cabecalho">
+                        <span class="chev">▶</span>
+                        <span class="nome-grupo">@g.Nome</span>
+                        <span class="cat">@g.Categoria</span>
+                        <span class="sp"></span>
+                        <span class="grupo-info muted sm">@g.QuantidadeItens itens · fechado (valor do servidor)</span>
+                        <span class="grupo-subtotal">@Formato.Moeda(g.Subtotal)</span>
+                    </div>
+                    <div class="g-body grupo-corpo"></div>
                 </div>
-                <div class="grupo-corpo" style="display:none"></div>
-            </div>
-        }
+            }
+        </div>
 
         @if (o.Filhos.Count > 0)
         {
-            <div class="card mt-3"><div class="card-header">Orçamentos vinculados (versões anteriores)</div>
-                <ul class="list-group list-group-flush">
-                    @foreach (var f in o.Filhos)
-                    {
-                        <li class="filho list-group-item d-flex" data-total="@f.Total.ToString(inv)">
-                            <span>#@f.Id · @f.Descricao</span><span class="ms-auto">@Formato.Moeda(f.Total)</span>
-                        </li>
-                    }
-                </ul>
+            <div class="card links">
+                <div class="lh"><h3>Orçamentos vinculados <span class="pill" style="--c:var(--accent)">versões anteriores</span></h3></div>
+                @foreach (var f in o.Filhos)
+                {
+                    <div class="lr filho" data-total="@f.Total.ToString(inv)">
+                        <span class="id">#@f.Id</span><span class="sp">@f.Descricao</span><b class="num">@Formato.Moeda(f.Total)</b>
+                    </div>
+                }
             </div>
         }
     </div>
