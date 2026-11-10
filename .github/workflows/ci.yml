@@ -61,6 +61,37 @@ jobs:
       # Testcontainers sobe um Postgres descartável no Docker do runner.
       - run: dotnet test legacy/Budgets.Legacy.sln
 
+  e2e:
+    name: Tela no navegador (Playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @budgets/api generate
+
+      # Postgres e os dois Redis do próprio compose, com os valores de exemplo do .env.
+      # Sem Elasticsearch: a busca cai para o Postgres, o que estes testes não usam.
+      - run: cp .env.example .env
+      - run: docker compose up -d --wait postgres redis-cache redis-data
+      - run: pnpm seed:generate -- --profile small
+      - run: pnpm v2:seed small
+
+      - run: pnpm --filter @budgets/web exec playwright install --with-deps chromium
+      - run: pnpm v2:e2e
+        env:
+          CI: 'true'
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 7
+
   secrets:
     name: Detecção de segredos
     runs-on: ubuntu-latest

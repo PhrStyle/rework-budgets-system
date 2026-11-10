@@ -658,3 +658,11 @@ input.invalido {
 .novo-grupo input {
   flex: 1;
 }
+
+/* aviso de versão nova (8c) */
+.info.versao {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: space-between;
+}
