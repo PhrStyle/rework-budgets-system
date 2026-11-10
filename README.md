@@ -638,6 +638,19 @@ pnpm --filter @budgets/api generate   # client do Prisma (gerado, fora do git)
 pnpm test
 ```
 
+Para ver as duas versões funcionando, com os mesmos dados, cada servidor num terminal:
+
+```bash
+pnpm legacy:seed full && pnpm v2:seed full   # carrega os dois bancos (e a busca)
+pnpm legacy:api      # legada, back:  http://127.0.0.1:5080
+pnpm legacy:web      # legada, tela:  http://127.0.0.1:5081
+pnpm v2:api          # nova, API:     http://127.0.0.1:3000/api
+pnpm v2:worker       # nova, worker (outbox → fila → busca)
+pnpm v2:web          # nova, tela:    http://127.0.0.1:5173
+```
+
+Nas duas telas, escolha um usuário e abra um orçamento; com outro usuário numa janela anônima, dá para ver o bloqueio de edição. O ambiente que emula a VPS e o benchmark estão em [Como medimos](#como-medimos).
+
 | Comando | O que faz |
 |---|---|
 | `pnpm infra:up` / `infra:down` | Sobe ou para os serviços, mantendo os dados |
