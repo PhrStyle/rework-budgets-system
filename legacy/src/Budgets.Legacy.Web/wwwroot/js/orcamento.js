@@ -150,9 +150,13 @@ $(function () {
 
   // ---------- busca de produtos: front → API → LIKE no banco (problemas 3 e 13) ----------
   var esperaBusca = null;
-  $tela.on('keyup', '.busca-produto input', function (e) {
+  // "input" (e não keyup) dispara para teclado, colar, autocompletar e teclados virtuais.
+  $tela.on('keydown', '.busca-produto input', function (e) {
     var $busca = $(this).closest('.busca-produto');
-    if (e.key === 'Escape') { if ($busca.hasClass('linha-busca')) $busca.remove(); return; }
+    if (e.key === 'Escape' && $busca.hasClass('linha-busca')) $busca.remove();
+  });
+  $tela.on('input', '.busca-produto input', function () {
+    var $busca = $(this).closest('.busca-produto');
     var termo = $(this).val().trim();
     clearTimeout(esperaBusca);
     if (termo.length < 2) { $busca.find('.sugestoes').empty(); return; }
