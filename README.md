@@ -70,7 +70,7 @@ As duas versões implementam as mesmas regras; só muda **como**.
 | Item | `preço por unidade × quantidade × (1 − desconto do item %)` |
 | Unidades | Cada produto tem a sua: **un** (só inteiros), **m**, **L** e **kg** (até 2 casas decimais) |
 | Desconto | **Só por item**, de 0% a 100%. Não há desconto no grupo nem no total |
-| Ajuste de prazo | De −100% a +100% (pode ser negativo) |
+| Ajuste de prazo (dilação) | De −100% a +100% (pode ser negativo) |
 | Margem | De 0% a +100% (reduções são feitas pelo desconto do item) |
 | Grupo | Soma dos itens |
 | Orçamento | `(Σ grupos + Σ totais dos filhos) → aplica o ajuste de prazo % → aplica a margem %`, nessa ordem, cada um sobre o resultado anterior |
@@ -101,6 +101,7 @@ As duas versões implementam as mesmas regras; só muda **como**.
 | 11 | Salvar enviava o orçamento **inteiro** (ex.: 12 grupos e 500+ produtos para mudar um) | Salvamentos lentos e transações enormes para mudanças pequenas | Salvar grava só o *changeset* do rascunho, numa transação | NestJS · Postgres · Redis | — |
 | 12 | Edições só na página e no `localStorage` até salvar; para não perder trabalho, salvamento automático a cada 5 minutos | Queda de energia ou navegador fechado perdia o progresso; o salvamento automático gravava simulações indesejadas | Rascunho no servidor (Redis) e botão “Salvar alterações”; sem salvamento automático | Redis · NestJS | — |
 | 13 | O jQuery chamava o front (Razor), que chamava a API do back, e a resposta fazia o caminho de volta | Cada chamada atravessava dois servidores e duas serializações; endpoints e DTOs duplicados nos dois projetos | O navegador chama uma API só, com contratos compartilhados em TypeScript | NestJS · `packages/contracts` | — |
+| 14 | Mudar margem, ajuste de prazo (dilação) ou salvar exigia recarregar a página e recalcular no back, porque o front não tinha os grupos fechados | Fluxo de trabalho interrompido a cada mudança global | O servidor recalcula a partir dos subtotais e devolve o total; a tela atualiza só o necessário, sem recarregar | NestJS · TanStack Query · `budget-calc` | — |
 
 ### Por que trocar de stack?
 
@@ -236,7 +237,7 @@ Uma edição vai só para o rascunho do usuário no Redis, e a API devolve os to
 
 ### 4. Dinheiro: float × decimal
 
-- **Problema:** A lógica de cálculo existia **nos dois lados**, e cada um calculava um pedaço: o navegador (JavaScript, float) calculava o que estava carregado no DOM, para a edição responder na hora; o servidor (C#, decimal) fazia as operações que precisavam do orçamento inteiro, porque carregar milhares de linhas no DOM era lento demais. O total que o usuário via misturava os dois, e os valores divergiam em centavos. Como **paliativo**, com o aval do cliente, passou-se a **arredondar sempre para cima em todo cálculo**: se fosse para errar, que errasse para cima e minimizasse as perdas.
+- **Problema:** A lógica de cálculo existia **nos dois lados**, e cada um calculava um pedaço: o navegador (JavaScript, float) calculava o que estava carregado no DOM, para a edição responder na hora; o servidor (C#, decimal) fazia as operações que precisavam do orçamento inteiro, porque carregar milhares de linhas no DOM era lento demais. O total que o usuário via misturava os dois, e os valores divergiam em centavos. Na prática, o cálculo do front era só uma prévia: toda ação definitiva (salvar, mudar margem ou ajuste de prazo) era recalculada pelo back, que era a fonte da verdade. Como **paliativo**, com o aval do cliente, passou-se a **arredondar sempre para cima em todo cálculo**: se fosse para errar, que errasse para cima e minimizasse as perdas.
 - **Impacto:** O valor visto pelo usuário não era o gravado. Havia duas implementações da mesma regra, cada uma responsável por uma parte: para saber se um número estava certo, era preciso saber qual lado o tinha calculado, e qualquer mudança na regra precisava ser feita nos dois lugares sem desencaixar as partes. O paliativo só escondia o problema: em float até o arredondamento para cima falha (`1.1 * 100 = 110.00000000000001` → 111 centavos), e os totais ficavam enviesados para cima. Os problemas de cálculo chegaram a cortar funcionalidade: uma versão anterior tinha **desconto no total e por item**, e o desconto no total foi removido, ficando só o por item.
 - **Solução:**
   - Valores em **centavos inteiros** (×100) e percentuais em **pontos-base inteiros** (5,5% = 550); colunas `Int`/`BigInt`, nunca `Float`
@@ -441,6 +442,27 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 
 ---
 
+### 14. Recarregar a página a cada mudança global
+
+- **Problema:** Como o front só tinha os grupos abertos, uma mudança que afetava o orçamento inteiro não podia ser calculada no navegador. Ao mudar a margem, o ajuste de prazo (dilação) ou ao salvar, a página era **recarregada** e uma função de **recálculo no back** atualizava os totais.
+- **Impacto:** O fluxo de trabalho era interrompido a cada mudança global: a tela piscava, os grupos abertos fechavam e a rolagem se perdia. Era o paliativo de um paliativo: o cálculo no front existia para a tela responder rápido, mas as mudanças mais importantes acabavam no servidor e num recarregamento.
+- **Solução:**
+  - Mudar margem ou ajuste de prazo é um `PATCH` no rascunho; o servidor recalcula com `calcFromSubtotals`, a partir dos subtotais dos grupos e dos totais dos filhos, **sem ler item nenhum**, e devolve o total.
+  - A tela atualiza só os números que mudaram (TanStack Query), sem recarregar a página: os grupos abertos e a rolagem continuam onde estavam.
+  - Como o servidor é a única fonte do cálculo, não existe mais “prévia” no front que precise ser corrigida depois.
+- **Resultado:**
+
+| Métrica | Antes | Depois |
+|---|---|---|
+| Recarregamentos de página ao mudar a margem | 1 | 0 |
+| Itens lidos para recalcular a margem (orçamento de 1.000 itens) | todos | 0 |
+| Tempo até a tela mostrar o novo total (ambiente “VPS”) | — | — |
+
+- **Trade-offs:** ⟨A atualização depende de uma ida ao servidor; com o cálculo em inteiros compartilhado, o front pode mostrar o valor na hora (otimista) e o servidor confirma.⟩
+- **Onde ver:** ⟨…⟩
+
+---
+
 ## Como medimos
 
 | | |
@@ -449,7 +471,7 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 | **Calibração** | ⟨RTT medido de verdade do Brasil até uma VPS em US Central: X ms; CPU calibrada com benchmark⟩ |
 | **Carga** | ⟨k6, N usuários virtuais, cenários em `bench/`⟩ |
 | **Dados** | Gerador determinístico ([`packages/seed`](packages/seed/src/generate.ts)), semente fixa: 3.200 orçamentos e 426 mil itens; 5.500 produtos (un, m, L, kg); 2.200 clientes; 60% pequenos (até 60 itens), 30% médios (até 300), 9,5% grandes (12 grupos, 300 a 800 itens), 16 no pior caso real (15 grupos, 1.000 itens) e 1 de estresse sintético (5.000 itens, acima do real); 40% contêm uma versão anterior. Um teste trava o hash da saída |
-| **Legada** | Versão simplificada em ASP.NET Core Razor Pages + jQuery (`legacy/`), na stack original, reproduzindo os 13 problemas, contra o mesmo Postgres e os mesmos dados |
+| **Legada** | Versão simplificada em ASP.NET Core Razor Pages + jQuery (`legacy/`), na stack original, reproduzindo os 14 problemas, contra o mesmo Postgres e os mesmos dados |
 | **O que não está aqui** | ⟨limitações conhecidas da medição⟩ |
 
 Reproduzir:
@@ -544,7 +566,7 @@ docs/adr/             decisões de arquitetura
 
 ## Status
 
-**Pronto =** as duas versões funcionando, com os 13 problemas reproduzidos na legada e resolvidos na nova, medidos e documentados.
+**Pronto =** as duas versões funcionando, com os 14 problemas reproduzidos na legada e resolvidos na nova, medidos e documentados.
 
 - [x] Protótipo visual (`prototype/index.html`)
 - [x] Repositório, CI e convenções
