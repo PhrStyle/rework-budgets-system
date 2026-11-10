@@ -56,6 +56,9 @@ services:
     <<: *node
     working_dir: /app/apps/api
     command: [node_modules/.bin/tsx, src/worker/main.ts]
+    environment:
+      <<: *node-env
+      WORKER_METRICS_HOST: 0.0.0.0
     deploy: { resources: { limits: { cpus: '0.25', memory: 512m } } }
   web:
     image: nginx:1.27-alpine

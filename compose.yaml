@@ -118,7 +118,43 @@ services:
       - '127.0.0.1:${GLITCHTIP_PORT:-8000}:8000'
     mem_limit: 768m
 
+  # Métricas (perfil "observabilidade"): o Prometheus coleta a API e o worker do ambiente "VPS"
+  # (compose.vps.yaml) e avalia as regras de alerta; o Grafana mostra o painel pronto.
+  prometheus:
+    image: prom/prometheus:v3.15.1
+    profiles: [observabilidade]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/prometheus/alertas.yml:/etc/prometheus/alertas.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - '127.0.0.1:${PROMETHEUS_PORT:-9090}:9090'
+    mem_limit: 512m
+
+  grafana:
+    image: grafana/grafana:13.3.0
+    profiles: [observabilidade]
+    depends_on: [prometheus]
+    environment:
+      # Só local: entra direto como visitante, sem login, e não há como editar.
+      GF_AUTH_ANONYMOUS_ENABLED: 'true'
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_DISABLE_LOGIN_FORM: 'true'
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/orcamentos.json
+      GF_ANALYTICS_REPORTING_ENABLED: 'false'
+      GF_ANALYTICS_CHECK_FOR_UPDATES: 'false'
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - '127.0.0.1:${GRAFANA_PORT:-3002}:3000'
+    mem_limit: 256m
+
 volumes:
+  prometheus-data:
   postgres-data:
   redis-data:
   elasticsearch-data:

@@ -187,6 +187,8 @@ Mesmas ações, mesmos dados, as duas versões no mesmo ambiente que emula a pro
 | Com 16 usuários: CPU média da aplicação | API 63% + front 13% | API 19% + nginx 3% + worker 4% (+ Elasticsearch 22%) | |
 | Divergência de centavos (tela × banco) | R$ 0,13 no pior caso, em 3 edições | R$ 0,00 | conferida no navegador (Playwright) |
 
+**Quanto é servidor e quanto é rede** (Prometheus, durante a carga de 16 usuários, p95 no servidor): salvar **28 ms**, editar 9 ms, abrir 5 ms, itens do grupo 7 ms, busca 49 ms. O resto dos ~160 ms que o usuário espera é a ida e volta da rede. Do salvar até a busca refletir: mediana 0,30 s, p95 0,53 s. A API usou 0,23 dos 1 núcleo que tem.
+
 O que a tabela mostra: com uma rede de verdade no caminho, cada ida custa ~150 ms, e a legada faz muitas (16 só para salvar: os grupos fechados, o envio e a página de novo), além de subir 152 KB a 10 Mbit/s. Com vários usuários, o gargalo vira o banco: apagar e regravar 1.000 itens por salvamento deixa o Postgres no limite, e o tempo de todos sobe. Na nova, salvar é uma ida e grava 2 linhas.
 
 Resultados brutos: `bench/results/*.json` (gerados pelo k6, fora do git). Medido na máquina do autor (12 núcleos, Docker rootless), com outros containers rodando: há algum ruído, menor que as diferenças medidas.
@@ -595,7 +597,7 @@ bash bench/run.sh legada carga && bash bench/run.sh nova carga && python3 bench/
 | Vitest · Testing Library · Playwright | Testes unitários, de integração, de componentes e no navegador | Vitest roda a API e os pacotes em Node e a tela em DOM simulado; Playwright faz o fluxo principal num Chromium de verdade, contra o build de produção |
 | Docker Compose | Ambiente local e ambiente “VPS” | Sobe a infraestrutura igual para todo mundo; com o `compose.vps.yaml`, a pilha inteira com os limites da VPS |
 | Toxiproxy · k6 | Emular rede de produção e medir | Toxiproxy injeta latência e banda entre o usuário e a aplicação; k6 repete o que o navegador de cada versão faz, com 1 e com 16 usuários |
-| Sentry · Prometheus · pino | Erros, métricas e logs estruturados com ID de requisição | Sentry (SDK oficial) na API, no worker e na tela; localmente vai para o GlitchTip (compatível, sem conta externa). O mesmo `request_id` no erro da tela, no erro do servidor e no log liga os três. Métricas no formato do Prometheus em `/api/metrics` |
+| Sentry · Prometheus · Grafana · pino | Erros, métricas e logs estruturados com ID de requisição | **Sentry** (SDK oficial) na API, no worker e na tela; localmente vai para o GlitchTip (compatível, sem conta externa); o mesmo `request_id` no erro da tela, no erro do servidor e no log liga os três. **Prometheus** coleta a API e o worker (latência por rota, cache, busca, fila, outbox, atraso da busca, CPU, memória, *event loop*) e avalia [11 regras de alerta](infra/prometheus/alertas.yml); o **Grafana** mostra um [painel pronto](infra/grafana/dashboards/orcamentos.json) |
 | ASP.NET Core Razor Pages · jQuery | Versão legada (reprodução) | Medir o “antes” na stack original, não numa imitação |
 
 ---
@@ -631,7 +633,7 @@ pnpm test
 | `pnpm v2:web` | Sobe a tela nova em `http://127.0.0.1:5173` (precisa da API no ar; o Vite repassa `/api` para ela) |
 | `pnpm v2:web:prod` | Build de produção da tela servido em `http://127.0.0.1:4173`, com os cabeçalhos de cache e o `version.json` |
 | `pnpm v2:e2e` | Testes no navegador (Playwright): editar e salvar, descartar e os cabeçalhos de cache; sobe a API e a tela se não estiverem no ar |
-| `pnpm obs:up` · `pnpm obs:dsn` | Sobe o GlitchTip (compatível com o Sentry) em `http://127.0.0.1:8000` e mostra o DSN de desenvolvimento; com `SENTRY_DSN` (API e worker) e `VITE_SENTRY_DSN` (build da tela), os erros vão para lá |
+| `pnpm obs:up` · `pnpm obs:dsn` | Sobe a observabilidade: GlitchTip (compatível com o Sentry) em `:8000`, Prometheus em `:9090` (alertas em `/alerts`) e Grafana em `:3002`. O `obs:dsn` mostra o DSN de desenvolvimento; com `SENTRY_DSN` (API e worker) e `VITE_SENTRY_DSN` (build da tela), os erros vão para o GlitchTip. O Prometheus coleta a API e o worker do ambiente “VPS” (`compose.vps.yaml`) |
 | `pnpm v2:check` | Conferência de drift: recalcula do zero cada total guardado e aponta divergências |
 | `pnpm v2:seed full` | Aplica as migrations (Prisma) e carrega os dados no banco da versão nova (`budgets_v2`); relê tudo pelo Prisma e confere cada total com o gerador |
 
@@ -699,4 +701,5 @@ docs/adr/             decisões de arquitetura
 - [x] Tela nova: deploy sem cache velho (hash no nome, `no-cache` no `index.html`, aviso de versão nova) e testes de componentes e no navegador
 - [x] Ambiente “VPS” (4 CPUs, 8 GB, rede emulada) e benchmark com k6 das duas versões
 - [x] Rastreamento de erros: Sentry na API, no worker e na tela (GlitchTip local), ligados pelo `request_id`
+- [x] Métricas: Prometheus coletando a API e o worker, 11 regras de alerta e painel no Grafana
 - [ ] README preenchido com os números

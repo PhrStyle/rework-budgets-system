@@ -17,6 +17,7 @@ import {
 import type { BudgetChangedJob } from '../queue/queues.js';
 import { loadBudgetDocument } from './indexer.js';
 import type { SearchIndexer } from './indexer.js';
+import { WorkerMetrics } from './metrics.js';
 import { OutboxRelay } from './relay.js';
 
 export interface WorkerConfig {
@@ -38,6 +39,7 @@ export interface WorkerConfig {
 }
 
 export interface RunningWorker {
+  metrics: WorkerMetrics;
   search: Queue<BudgetChangedJob>;
   maintenance: Queue;
   relay: OutboxRelay;
@@ -61,6 +63,7 @@ export async function startWorker(config: WorkerConfig): Promise<RunningWorker> 
   const search = new Queue<BudgetChangedJob>(SEARCH_QUEUE, { connection, defaultJobOptions });
   const maintenance = new Queue(MAINTENANCE_QUEUE, { connection, defaultJobOptions });
   const relay = new OutboxRelay(prisma, search);
+  const metrics = new WorkerMetrics(prisma, [search, maintenance]);
   const lock = {
     lockDuration: config.lockDurationMs ?? 30_000,
     stalledInterval: config.stalledIntervalMs ?? 30_000,
@@ -74,6 +77,8 @@ export async function startWorker(config: WorkerConfig): Promise<RunningWorker> 
       if (doc) await indexer.upsertBudget(doc);
       else await indexer.removeBudget(job.data.budgetId);
       const lagMs = Date.now() - Date.parse(job.data.changedAt);
+      metrics.indexed.inc({ result: 'ok' });
+      metrics.lag.observe(lagMs / 1000);
       logger.info(
         { budgetId: job.data.budgetId, attempt: job.attemptsMade + 1, lagMs },
         'busca atualizada',
@@ -91,6 +96,7 @@ export async function startWorker(config: WorkerConfig): Promise<RunningWorker> 
         prisma,
         Object.fromEntries(stored.map((s) => [s.id, Number(s.totalCents)])),
       );
+      metrics.drift.set(report.mismatches.length);
       if (report.mismatches.length > 0) {
         reporter.message('drift: totais guardados divergem do recálculo', {
           tags: { queue: MAINTENANCE_QUEUE },
@@ -117,6 +123,7 @@ export async function startWorker(config: WorkerConfig): Promise<RunningWorker> 
       // Falha que se resolve na próxima tentativa é o sistema funcionando; esgotar as tentativas,
       // não: a tarefa fica em "failed" e alguém precisa olhar.
       if (job && job.attemptsMade >= (job.opts.attempts ?? 1)) {
+        if (w.name === SEARCH_QUEUE) metrics.indexed.inc({ result: 'failed' });
         reporter.capture(error, {
           tags: { queue: w.name, job: job.name },
           extra: { jobId: job.id, data: job.data, attempts: job.attemptsMade },
@@ -124,6 +131,7 @@ export async function startWorker(config: WorkerConfig): Promise<RunningWorker> 
       }
     });
     w.on('stalled', (jobId) => {
+      metrics.stalled.inc({ queue: w.name });
       logger.warn(
         { queue: w.name, jobId },
         'tarefa travada (worker parou de responder); voltou para a fila',
@@ -158,6 +166,7 @@ export async function startWorker(config: WorkerConfig): Promise<RunningWorker> 
   void tick();
 
   return {
+    metrics,
     search,
     maintenance,
     relay,

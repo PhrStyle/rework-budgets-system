@@ -45,7 +45,7 @@ export interface AppConfig {
 @Module({})
 class AppModule {}
 
-function appModule(config: AppConfig): DynamicModule {
+function appModule(config: AppConfig, metrics: Metrics): DynamicModule {
   return {
     module: AppModule,
     imports: [
@@ -73,7 +73,7 @@ function appModule(config: AppConfig): DynamicModule {
       { provide: REDIS_DATA_URL, useValue: config.redisDataUrl },
       { provide: REDIS_CACHE_URL, useValue: config.redisCacheUrl },
       { provide: ELASTICSEARCH_URL, useValue: config.elasticsearchUrl },
-      Metrics,
+      { provide: Metrics, useValue: metrics },
       Cache,
       SearchService,
       { provide: DRAFT_TTL_MS, useValue: config.draftTtlMs },
@@ -95,10 +95,27 @@ export async function createApp(config: AppConfig): Promise<NestFastifyApplicati
     void reply.header(REQUEST_ID_HEADER, request.id);
     done();
   });
-
-  const app = await NestFactory.create<NestFastifyApplication>(appModule(config), adapter, {
-    bufferLogs: true,
+  // Latência de toda resposta (inclusive 404 e erro), pelo tempo que o próprio Fastify mede.
+  // A rota é o modelo registrado; o que não casou com rota nenhuma vira uma série só.
+  const metrics = new Metrics();
+  adapter.getInstance().addHook('onResponse', (request, reply, done) => {
+    const route = request.routeOptions.url ?? 'nao_encontrada';
+    if (route !== '/api/metrics') {
+      metrics.http.observe(
+        { method: request.method, route, status_code: String(reply.statusCode) },
+        reply.elapsedTime / 1000,
+      );
+    }
+    done();
   });
+
+  const app = await NestFactory.create<NestFastifyApplication>(
+    appModule(config, metrics),
+    adapter,
+    {
+      bufferLogs: true,
+    },
+  );
   app.useLogger(app.get(Logger));
   app.setGlobalPrefix('api');
   app.useGlobalPipes(new StandardSchemaValidationPipe());

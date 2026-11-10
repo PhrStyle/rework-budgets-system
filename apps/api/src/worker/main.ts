@@ -5,6 +5,7 @@ import { createReporter } from '../errors/reporter.js';
 import { elasticsearchUrl, redisDataUrl } from '../db/url.js';
 import { createElastic } from '../search/elastic.js';
 import { ElasticIndexer } from '../search/elastic-indexer.js';
+import { serveMetrics } from './metrics.js';
 import { startWorker } from './worker.js';
 
 const logger = pino({
@@ -31,12 +32,23 @@ const worker = await startWorker({
   driftCheckCron: process.env.DRIFT_CHECK_CRON ?? '0 3 * * *',
   reporter,
 });
-logger.info('worker no ar: outbox → fila → Elasticsearch, e conferência de drift agendada');
+// Métricas para o Prometheus. Só na máquina por padrão; num container, 0.0.0.0.
+const metricsPort = Number(process.env.WORKER_METRICS_PORT ?? 3001);
+const metricsServer = serveMetrics(
+  worker.metrics.registry,
+  metricsPort,
+  process.env.WORKER_METRICS_HOST ?? '127.0.0.1',
+);
+logger.info(
+  { metrics: `:${metricsPort}/metrics` },
+  'worker no ar: outbox → fila → Elasticsearch, e conferência de drift agendada',
+);
 
 // Desligamento limpo (deploy): termina as tarefas em andamento antes de sair.
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {
     logger.info({ signal }, 'desligando o worker');
+    metricsServer.close();
     void worker
       .close()
       .then(() => reporter.flush())
