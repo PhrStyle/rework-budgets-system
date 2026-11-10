@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, HttpCode, Inject, Param, Post, UseGuards } from '@nestjs/common';
-import { draftOpsBody, idParam } from '@budgets/contracts';
+import { draftOpsBody, idParam } from '@budgets/contracts/schemas';
 import type {
   BudgetDetail,
   DraftOpsBody,

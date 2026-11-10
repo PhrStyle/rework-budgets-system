@@ -1,5 +1,6 @@
 import js from '@eslint/js';
 import prettier from 'eslint-config-prettier';
+import reactHooks from 'eslint-plugin-react-hooks';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
@@ -34,6 +35,12 @@ export default tseslint.config(
       // Módulos do Nest são classes vazias com decorator.
       '@typescript-eslint/no-extraneous-class': ['error', { allowWithDecorator: true }],
     },
+  },
+  {
+    // Tela (navegador): regras dos hooks do React.
+    files: ['apps/web/**/*.{ts,tsx}'],
+    ...reactHooks.configs.flat['recommended-latest'],
+    languageOptions: { globals: globals.browser },
   },
   {
     // Nos testes, um auxiliar genérico dá tipo ao JSON da resposta (`res.json<T>()`).
