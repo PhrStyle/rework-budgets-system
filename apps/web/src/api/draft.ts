@@ -6,6 +6,15 @@ import { useUser } from '../session.js';
 import { ApiFailure, api } from './client.js';
 import { keys } from './queries.js';
 
+/**
+ * A resposta de uma edição pode chegar depois da resposta de uma edição posterior. Só vale mostrar
+ * se ela for tão ou mais nova que a atual, pelo contador de alterações do rascunho.
+ */
+export function isNewer(current: BudgetDetail | undefined, incoming: BudgetDetail): boolean {
+  if (!current?.draft || !incoming.draft) return true;
+  return incoming.draft.changes >= current.draft.changes;
+}
+
 /** Avisa as outras abas do mesmo orçamento (mesmo navegador) que algo mudou. */
 function channel(budgetId: number): BroadcastChannel {
   return new BroadcastChannel(`orcamento:${budgetId}`);
@@ -38,10 +47,9 @@ export function useDraft(budgetId: number) {
   const [error, setError] = useState<string | null>(null);
 
   const showDetail = (detail: BudgetDetail) => {
-    const current = queryClient.getQueryData<BudgetDetail>(detailKey);
-    const newer = (detail.draft?.changes ?? -1) >= (current?.draft?.changes ?? -1);
-    if (!current || !detail.draft || !current.draft || newer)
+    if (isNewer(queryClient.getQueryData<BudgetDetail>(detailKey), detail)) {
       queryClient.setQueryData(detailKey, detail);
+    }
   };
   const refreshItems = () =>
     queryClient.invalidateQueries({ queryKey: ['groupItems', budgetId, viewer] });

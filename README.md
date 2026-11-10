@@ -400,18 +400,20 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 ### 8. Sem testes na parte mais crítica
 
 - **Problema:** O cálculo estava dividido entre o front (JavaScript que lia e escrevia o DOM) e o back (C#), cada lado com uma parte da regra. Não havia testes no front, a parte mais crítica.
-- **Impacto:** ⟨Erros de valor só apareciam em uso; mudar a regra era arriscado.⟩
+- **Impacto:** Sem teste, um erro de valor só aparecia em uso, num orçamento de cliente; e mudar a regra exigia mexer em dois lugares (JS e C#) sem nenhuma rede de segurança.
 - **Solução:**
-  - ⟨Regra em funções puras de TypeScript (`packages/money`, `packages/budget-calc`), sem DOM nem banco⟩
-  - ⟨Testes unitários e de propriedade (ex.: delta acumulado == recálculo do zero)⟩
-  - ⟨Testes de componentes no front com Vitest + Testing Library⟩
+  - Regra em funções puras de TypeScript (`packages/money`, `packages/budget-calc`), sem DOM nem banco, usadas pela API; a tela não calcula.
+  - Testes unitários, de propriedade e de integração: 80 edições aleatórias com o total por delta conferido contra o recálculo do zero, antes e depois de salvar; conferência de cada total dos 426 mil itens contra o gerador.
+  - Testes de componentes da tela (Vitest + Testing Library) e do fluxo principal num navegador de verdade (Playwright).
+  - Testes de mutação à mão nos pontos críticos: desligar o delta, o AOF, o `asciifolding` ou a numeração do outbox de propósito e conferir que algum teste falha.
 
 - **Resultado:**
 
 | Métrica | Antes | Depois |
 |---|---|---|
 | Testes da regra de cálculo | 0 | 58 (dinheiro + orçamento), 100% das linhas |
-| Cobertura de `packages/*` | — | — |
+| Cobertura de linhas pelo Vitest | — | `money` e `budget-calc` 100% · API 85% · tela 29% (as páginas são cobertas pelo Playwright, fora desta medição) |
+| Testes automatizados | 0 no front | 147 (Vitest: 134 em Node, 13 na tela) + 3 no navegador (Playwright) + 22 na legada |
 
 - **Onde ver:** [`packages/money`](packages/money/src) · [`packages/budget-calc`](packages/budget-calc/src) · casos compartilhados com a legada em [`fixtures/budget-cases.json`](fixtures/budget-cases.json)
 
@@ -422,16 +424,25 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 - **Problema:** A cada atualização, o JS e o C# eram publicados juntos no servidor, mas o navegador dos usuários mantinha o JS da versão anterior em cache. O sistema abria com o **front antigo falando com o back-end novo**. A saída era pedir para limpar o cache ou recarregar com Ctrl+F5.
 - **Impacto:** Várias partes quebravam logo depois de cada deploy, parecendo bugs da nova versão. O problema era recorrente e afetava a reputação e a confiança no time de desenvolvimento.
 - **Solução:**
-  - ⟨**Cache busting:** o Vite gera arquivos com hash do conteúdo no nome (`app.3f9a1c.js`). Versão nova = nome novo = o navegador é obrigado a baixar⟩
-  - ⟨**Cache por tipo de arquivo:** `index.html` com `Cache-Control: no-cache` (sempre revalida); assets com hash como `immutable` e cache longo⟩
-  - ⟨**Versão em toda resposta:** a API devolve `X-App-Version`; se for diferente da versão do front, a tela mostra “Nova versão disponível, recarregar”, sem quebrar⟩
-  - ⟨**Contratos compartilhados:** os tipos da API ficam em `packages/contracts`; uma mudança incompatível quebra o build, não o usuário⟩
-  - ⟨**Deploy compatível:** a API aceita a versão anterior do front durante a transição (mudanças aditivas primeiro, remoções depois)⟩
+  - **Hash do conteúdo no nome:** o Vite gera `index-4OKgV8ms.js`; mudou o código, mudou o nome, e o navegador é obrigado a baixar o arquivo novo.
+  - **Cache por tipo de arquivo:** arquivos com hash ficam em cache por um ano (`immutable`, nem revalidam); o `index.html` e o `version.json` sempre revalidam (`no-cache`): são eles que apontam para os nomes novos.
+  - **Aviso de versão nova:** o build publica um `version.json` (commit e hora); a tela consulta ao voltar para a aba e a cada 5 minutos e, se mudou, mostra “Uma versão nova do sistema foi publicada · Recarregar”. Recarregar é seguro: as alterações não salvas estão no rascunho, no servidor.
+  - **Contratos compartilhados:** os tipos da API ficam em `packages/contracts`; uma mudança incompatível quebra o build, não o usuário.
+  - ⟨**Deploy compatível:** mudanças na API aditivas primeiro e remoções depois, para a versão anterior da tela continuar funcionando durante a transição (regra de processo, ainda não exercitada)⟩
 
 - **Resultado:**
 
 | Métrica | Antes | Depois |
 |---|---|---|
+| Ctrl+F5 necessário após deploy | sim, recorrente | não (conferido: deploy da versão B com a aba aberta na A; aviso ao voltar para a aba; “Recarregar” trouxe o JS novo) |
+| Cache do JS | 7 dias, sem versão no nome | 1 ano, com o hash no nome (o nome muda a cada versão) |
+| Cache do `index.html` | — | `no-cache`: sempre revalida |
+| Erros no Sentry nas primeiras horas após deploy | — | — |
+
+- **Trade-offs:** Uma SPA separa front e back em dois artefatos, o que **aumenta** o risco de descompasso de versões se nada for feito; a mitigação precisa existir desde o primeiro deploy. O aviso depende de o usuário clicar: uma aba esquecida aberta continua na versão antiga até lá (ela só não quebra se a API se mantiver compatível). Os cabeçalhos de cache estão no `vite preview`; na etapa 9, o nginx da “VPS” repete as mesmas regras.
+- **Onde ver:** legada: [`Program.cs` do front](legacy/src/Budgets.Legacy.Web/Program.cs) (scripts com cache de 7 dias) e a tag do script em [`Orcamento.cshtml`](legacy/src/Budgets.Legacy.Web/Pages/Orcamento.cshtml), sem versão no nome. O próprio ASP.NET já oferecia a correção (`asp-append-version`), que o sistema não usava · nova: [`vite.config.ts`](apps/web/vite.config.ts) (versão, `version.json` e cabeçalhos), [`version.ts`](apps/web/src/version.ts) e [`NewVersion.tsx`](apps/web/src/components/NewVersion.tsx); testes em [`editar.spec.ts`](apps/web/e2e/editar.spec.ts) (cabeçalhos no navegador) e [`NewVersion.test.tsx`](apps/web/src/components/NewVersion.test.tsx)
+
+---|---|---|
 | Ctrl+F5 necessário após deploy | sim, recorrente | — |
 | Erros no Sentry nas primeiras horas após deploy | — | — |
 | Tempo até todos os usuários estarem na versão nova | — | — |
@@ -584,7 +595,7 @@ Reproduzir:
 | PostgreSQL + Prisma | Fonte da verdade | Schema e migrations versionados, tipos gerados a partir do banco; o que o Prisma não modela (`CHECK` com os limites das regras) fica na migration ([ADR 0005](docs/adr/0005-modelo-de-dados-da-versao-nova.md)) |
 | Redis | Rascunhos de edição (que seguram o bloqueio), cache e filas (BullMQ), em duas instâncias: `redis-data` e `redis-cache` | Duas instâncias porque cache pode ser despejado e rascunho não: LRU sem persistência num, `noeviction` + AOF no outro |
 | Elasticsearch | Listagem, filtros e autocomplete | Busca que ignora acentos, tolera erro de digitação e acha por prefixo, o que o `LIKE` não faz; alimentado por fila a partir de um outbox |
-| Vitest | Testes unitários e de integração | ⟨…⟩ |
+| Vitest · Testing Library · Playwright | Testes unitários, de integração, de componentes e no navegador | Vitest roda a API e os pacotes em Node e a tela em DOM simulado; Playwright faz o fluxo principal num Chromium de verdade, contra o build de produção |
 | Docker Compose | Ambiente local e ambiente “VPS” | ⟨…⟩ |
 | Toxiproxy · k6 | Emular rede de produção e medir | ⟨…⟩ |
 | Sentry · Prometheus · pino | Erros, métricas e logs estruturados com ID de requisição | ⟨…⟩ |
@@ -621,6 +632,8 @@ pnpm test
 | `pnpm v2:worker` | Sobe o worker (processo separado da API): outbox → fila → busca, e a conferência de drift agendada (03:00) |
 | `pnpm v2:reindex` | Reconstrói os índices do Elasticsearch a partir do Postgres, sem tirar a busca do ar (o `v2:seed` já faz isso) |
 | `pnpm v2:web` | Sobe a tela nova em `http://127.0.0.1:5173` (precisa da API no ar; o Vite repassa `/api` para ela) |
+| `pnpm v2:web:prod` | Build de produção da tela servido em `http://127.0.0.1:4173`, com os cabeçalhos de cache e o `version.json` |
+| `pnpm v2:e2e` | Testes no navegador (Playwright): editar e salvar, descartar e os cabeçalhos de cache; sobe a API e a tela se não estiverem no ar |
 | `pnpm v2:check` | Conferência de drift: recalcula do zero cada total guardado e aponta divergências |
 | `pnpm v2:seed full` | Aplica as migrations (Prisma) e carrega os dados no banco da versão nova (`budgets_v2`); relê tudo pelo Prisma e confere cada total com o gerador |
 
@@ -685,6 +698,6 @@ docs/adr/             decisões de arquitetura
 - [x] API nova: Elasticsearch na listagem e no autocomplete (acentos, erro de digitação, prefixo), com o Postgres de reserva
 - [x] Tela nova (React + Vite + TanStack Query): login, listagem com busca, orçamento com grupos carregados por página e aviso de quem está editando
 - [x] Tela nova: edição em rascunho (cabeçalho, itens, inserir acima/abaixo, arrastar, grupos), barra com Salvar/Descartar e abas sincronizadas
-- [ ] Tela nova: deploy sem cache velho e testes no navegador
+- [x] Tela nova: deploy sem cache velho (hash no nome, `no-cache` no `index.html`, aviso de versão nova) e testes de componentes e no navegador
 - [ ] Ambiente “VPS” e benchmark
 - [ ] README preenchido com os números

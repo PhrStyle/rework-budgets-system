@@ -1,6 +1,7 @@
 import { Link, Navigate, Outlet, useNavigate } from 'react-router';
 
 import { setUser, useUser } from '../session.js';
+import { NewVersion } from './NewVersion.js';
 
 function toggleTheme() {
   const root = document.documentElement;
@@ -51,6 +52,7 @@ export function Layout() {
         </div>
       </header>
       <main>
+        <NewVersion />
         <Outlet />
       </main>
     </>

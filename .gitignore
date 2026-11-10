@@ -34,3 +34,7 @@ apps/api/src/generated/
 
 # Dados gerados (pnpm seed:generate)
 data/
+
+# Playwright (relatórios e rastros dos testes no navegador)
+playwright-report/
+test-results/
