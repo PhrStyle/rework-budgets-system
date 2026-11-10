@@ -563,6 +563,7 @@ cp .env.example .env        # troque a senha; mude as portas se alguma já estiv
 pnpm install
 pnpm infra:up               # Postgres, redis-cache, redis-data e Elasticsearch
 pnpm seed:generate          # dados de exemplo em data/seed/full (~60 MB, fora do git)
+pnpm --filter @budgets/api generate   # client do Prisma (gerado, fora do git)
 pnpm test
 ```
 
@@ -576,6 +577,7 @@ pnpm test
 | `pnpm legacy:api` | Sobe a API do back da legada em `http://127.0.0.1:5080` (Swagger em `/swagger`) |
 | `pnpm legacy:web` | Sobe o front da legada em `http://127.0.0.1:5081` (precisa da API no ar); escolha um usuário e abra um orçamento |
 | `pnpm legacy:test` | Testes da legada (xUnit + Testcontainers; precisa de Docker) |
+| `pnpm v2:seed full` | Aplica as migrations (Prisma) e carrega os dados no banco da versão nova (`budgets_v2`); relê tudo pelo Prisma e confere cada total com o gerador |
 
 | Serviço | Porta local (padrão) | Configuração |
 |---|---|---|
@@ -589,7 +591,7 @@ pnpm test
 ## Estrutura do repositório
 
 ```
-apps/api              API NestJS
+apps/api              API NestJS; schema e migrations do Prisma em apps/api/prisma
 apps/web              front React + Vite
 packages/money        dinheiro em inteiros
 packages/budget-calc  regras de cálculo do orçamento
@@ -630,7 +632,9 @@ docs/adr/             decisões de arquitetura
 - [x] Versão legada: modelo (EF Core, `decimal`), cálculo com o paliativo e carga dos dados
 - [x] Versão legada: API do back (busca por `LIKE`, bloqueio que expira, grupo inteiro, salvar o orçamento inteiro)
 - [x] Versão legada: front Razor Pages intermediário, login simulado e telas em jQuery
-- [ ] API nova: Postgres → Redis → Elasticsearch
+- [x] API nova: modelo de dados (Prisma, inteiros, `CHECK` com os limites) e carga conferida centavo por centavo
+- [ ] API nova: leitura, rascunho no Redis e salvar só o que mudou
+- [ ] API nova: Redis → Elasticsearch
 - [ ] Front (React + Vite + TanStack Query)
 - [ ] Ambiente “VPS” e benchmark
 - [ ] README preenchido com os números
