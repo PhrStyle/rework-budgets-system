@@ -1,0 +1,15 @@
+@page
+@model LoginModel
+@{ ViewData["Title"] = "Entrar"; }
+<h1 class="h4 mb-3">Quem está usando?</h1>
+<p class="text-muted">Login simulado: escolha um usuário. Abra outra janela anônima com outro usuário para ver o bloqueio de edição.</p>
+<div class="list-group" style="max-width: 420px">
+    @foreach (var u in Model.Usuarios)
+    {
+        <form method="post">
+            <input type="hidden" name="usuarioId" value="@u.Id" />
+            <input type="hidden" name="nome" value="@u.Nome" />
+            <button type="submit" class="list-group-item list-group-item-action">@u.Nome</button>
+        </form>
+    }
+</div>

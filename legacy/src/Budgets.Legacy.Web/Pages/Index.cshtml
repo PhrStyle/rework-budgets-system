@@ -1,0 +1,43 @@
+@page
+@model IndexModel
+@{
+    ViewData["Title"] = "Orçamentos";
+    var paginas = Math.Max(1, (int)Math.Ceiling(Model.Resultado.Total / 20.0));
+}
+<form method="get" class="row g-2 mb-3">
+    <div class="col-md-6"><input class="form-control" name="busca" value="@Model.Busca" placeholder="Buscar por descrição, cliente ou número" /></div>
+    <div class="col-md-3">
+        <select class="form-select" name="status">
+            <option value="">Todos os status</option>
+            @foreach (var s in new[] { "Rascunho", "Enviado", "Aprovado", "Perdido" })
+            {
+                <option selected="@(Model.Status == s)">@s</option>
+            }
+        </select>
+    </div>
+    <div class="col-md-3"><button class="btn btn-primary w-100">Buscar</button></div>
+</form>
+<p class="text-muted small">@Model.Resultado.Total orçamentos · busca em @Model.Milissegundos ms (front → API → LIKE no banco)</p>
+<table class="table table-hover align-middle">
+    <thead><tr><th>Nº</th><th>Descrição</th><th>Vendedor</th><th class="text-end">Total salvo</th><th>Status</th></tr></thead>
+    <tbody>
+        @foreach (var o in Model.Resultado.Itens)
+        {
+            <tr>
+                <td>@o.Id</td>
+                <td>
+                    <a asp-page="/Orcamento" asp-route-id="@o.Id">@o.Descricao</a>
+                    @if (o.Bloqueado) { <span class="badge bg-warning text-dark ms-1">aberto por @o.AbertoPor</span> }
+                </td>
+                <td>@o.Vendedor</td>
+                <td class="text-end">@Formato.Moeda(o.Total)</td>
+                <td>@o.Status</td>
+            </tr>
+        }
+    </tbody>
+</table>
+<nav class="d-flex gap-2 align-items-center">
+    @if (Model.Pagina > 1) { <a class="btn btn-outline-secondary btn-sm" asp-route-busca="@Model.Busca" asp-route-status="@Model.Status" asp-route-pagina="@(Model.Pagina - 1)">Anterior</a> }
+    <span class="small text-muted">Página @Model.Pagina de @paginas</span>
+    @if (Model.Pagina < paginas) { <a class="btn btn-outline-secondary btn-sm" asp-route-busca="@Model.Busca" asp-route-status="@Model.Status" asp-route-pagina="@(Model.Pagina + 1)">Próxima</a> }
+</nav>

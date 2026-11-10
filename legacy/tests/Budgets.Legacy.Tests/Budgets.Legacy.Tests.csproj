@@ -26,6 +26,7 @@
     <ProjectReference Include="..\..\src\Budgets.Legacy.Data\Budgets.Legacy.Data.csproj" />
     <ProjectReference Include="..\..\src\Budgets.Legacy.Seed\Budgets.Legacy.Seed.csproj" />
     <ProjectReference Include="..\..\src\Budgets.Legacy.Api\Budgets.Legacy.Api.csproj" />
+    <ProjectReference Include="..\..\src\Budgets.Legacy.Web\Budgets.Legacy.Web.csproj" />
   </ItemGroup>
 
 </Project>
