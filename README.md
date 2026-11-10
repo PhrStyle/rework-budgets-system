@@ -239,7 +239,7 @@ Uma edição vai só para o rascunho do usuário no Redis, e a API devolve os to
 | Tempo até a tela atualizar | — | — |
 
 - **Trade-offs:** ⟨Toda edição paga o RTT até o servidor; resposta otimista possível porque o cálculo é inteiro e determinístico.⟩
-- **Onde ver:** regra em [`packages/budget-calc`](packages/budget-calc/src/calc.ts) (`calcFromSubtotals`, `itemDelta`) · ⟨uso na API: `apps/api/…`⟩
+- **Onde ver:** legada: `recalcular()` em [`orcamento.js`](legacy/src/Budgets.Legacy.Web/wwwroot/js/orcamento.js), que lê o texto “R$ 1.234,56” de volta do DOM · regra nova: [`packages/budget-calc`](packages/budget-calc/src/calc.ts) (`calcFromSubtotals`, `itemDelta`) · ⟨uso na API: `apps/api/…`⟩
 
 ---
 
@@ -260,7 +260,7 @@ Uma edição vai só para o rascunho do usuário no Redis, e a API devolve os to
 | Armazenamento no navegador | — | 0 B |
 
 - **Trade-offs:** ⟨Consistência Redis × Postgres: Postgres sempre ganha; job que recalcula do zero e mede drift.⟩
-- **Onde ver:** ⟨…⟩
+- **Onde ver:** legada: `carregarItens()` em [`orcamento.js`](legacy/src/Budgets.Legacy.Web/wwwroot/js/orcamento.js). Reproduzido: como o salvar apaga e regrava os grupos com ids novos, o `localStorage` fica com chaves de grupos que não existem mais (15 chaves órfãs depois de um salvamento no pior caso) · ⟨nova: …⟩
 
 ---
 
@@ -308,7 +308,7 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 
 | Métrica | Antes | Depois |
 |---|---|---|
-| Divergência tela × banco (orçamento de 5.000 itens) | — | R$ 0,00 |
+| Prévia na tela × valor gravado ao salvar (pior caso real, 3 edições) | R$ 50.348.384,78 na tela → R$ 50.348.384,65 gravado: o total muda sozinho ao salvar | R$ 0,00 |
 | Valor cobrado a mais pelo arredondamento para cima (base de exemplo, 3.201 orçamentos) | R$ 988,32 no total, em 3.164 orçamentos; até R$ 8,59 num só | R$ 0,00 (paliativo removido) |
 | Implementações da regra de cálculo | 2 | 1 |
 | Testes do pacote de dinheiro | 0 | 38 (com testes de propriedade contra `BigInt`), 100% das linhas |
@@ -398,7 +398,7 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 | Tempo até todos os usuários estarem na versão nova | — | — |
 
 - **Trade-offs:** ⟨Uma SPA separa front e back em dois artefatos, o que **aumenta** o risco de descompasso de versões se nada for feito. A mitigação acima precisa existir desde o primeiro deploy.⟩
-- **Onde ver:** ⟨configuração do Vite, middleware de versão na API, teste de compatibilidade⟩
+- **Onde ver:** legada: [`Program.cs` do front](legacy/src/Budgets.Legacy.Web/Program.cs) (scripts com cache de 7 dias) e a tag do script em [`Orcamento.cshtml`](legacy/src/Budgets.Legacy.Web/Pages/Orcamento.cshtml), sem versão no nome. O próprio ASP.NET já oferecia a correção (`asp-append-version`), que o sistema não usava · ⟨nova: configuração do Vite e aviso de versão⟩
 
 ---
 
@@ -421,7 +421,7 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 | Conflitos detectados e recarregados | — | — |
 
 - **Trade-offs:** ⟨O bloqueio por orçamento impede dois usuários de trabalharem em paralelo no mesmo orçamento; foi mantido porque é a regra de negócio conhecida pelos usuários. Um rascunho esquecido segura o bloqueio por até 30 minutos.⟩
-- **Onde ver:** legada: [`OrcamentosController.Abrir`](legacy/src/Budgets.Legacy.Api/Controllers/OrcamentosController.cs) (marcação “aberto” que expira em 30 min) · ⟨nova: …⟩
+- **Onde ver:** legada: [`OrcamentosController.Abrir`](legacy/src/Budgets.Legacy.Api/Controllers/OrcamentosController.cs) (marcação “aberto” que expira em 30 min). Ao reproduzir, apareceu uma corrida: o “liberar” enviado pela página que sai (F5, outra aba) podia chegar depois da nova abertura e soltar o bloqueio dela; o “liberar” passou a levar o instante da abertura e só vale para ela · ⟨nova: …⟩
 
 ---
 
@@ -467,7 +467,7 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 | Salvamentos por sessão de edição | 1 a cada 5 min + manuais | só os manuais |
 
 - **Trade-offs:** ⟨Um rascunho abandonado expira em 30 minutos: é uma rede de segurança para imprevistos, não um lugar para guardar trabalho por dias. Em troca, o `redis-data` guarda dados do usuário e precisa de AOF e de monitoramento de memória.⟩
-- **Onde ver:** ⟨…⟩
+- **Onde ver:** legada: salvamento automático e `salvar()` em [`orcamento.js`](legacy/src/Budgets.Legacy.Web/wwwroot/js/orcamento.js). Reproduzido: uma quantidade editada de 4 para 9, sem salvar, volta a 4 depois que a página cai · ⟨nova: …⟩
 
 ---
 
@@ -483,12 +483,13 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 | Métrica | Antes | Depois |
 |---|---|---|
 | Servidores por chamada | 2 | 1 |
+| Carregar um grupo de 63 itens (rede local) | 21 ms, dos quais 8 ms só no salto front → API | — |
 | Serializações por chamada | 2 | 1 |
 | Lugares que definem cada endpoint | 2 | 1 |
 | Tempo de uma edição (ambiente “VPS”) | — | — |
 
 - **Trade-offs:** ⟨Com o front como aplicação estática, a API precisa cuidar de CORS e de autenticação diretamente.⟩
-- **Onde ver:** ⟨…⟩
+- **Onde ver:** legada: [`Intermediario.cs`](legacy/src/Budgets.Legacy.Web/Intermediario.cs) (endpoints `/front/...` que repassam à API) e os DTOs duplicados em [`Modelos.cs`](legacy/src/Budgets.Legacy.Web/Modelos.cs). O cabeçalho `Server-Timing` mostra no DevTools o tempo de cada salto · ⟨nova: …⟩
 
 ---
 
@@ -504,12 +505,12 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 
 | Métrica | Antes | Depois |
 |---|---|---|
-| Recarregamentos de página ao mudar a margem | 1 | 0 |
+| Recarregamentos de página ao mudar a margem | 1, salvando o orçamento inteiro (151 KB, ~450 ms em rede local, pior caso real) e fechando os grupos abertos | 0 |
 | Itens lidos para recalcular a margem (orçamento de 1.000 itens) | todos | 0 |
 | Tempo até a tela mostrar o novo total (ambiente “VPS”) | — | — |
 
 - **Trade-offs:** ⟨A atualização depende de uma ida ao servidor; com o cálculo em inteiros compartilhado, o front pode mostrar o valor na hora (otimista) e o servidor confirma.⟩
-- **Onde ver:** ⟨…⟩
+- **Onde ver:** legada: o tratamento de `#prazo` e `#margem` em [`orcamento.js`](legacy/src/Budgets.Legacy.Web/wwwroot/js/orcamento.js) · ⟨nova: …⟩
 
 ---
 
@@ -573,6 +574,7 @@ pnpm test
 | `pnpm seed:generate -- --profile small` | Gera um conjunto pequeno (60 orçamentos), o mesmo usado nos testes |
 | `pnpm legacy:seed full` | Carrega os dados no banco da legada (`budgets_legacy`) e compara os totais com a regra nova |
 | `pnpm legacy:api` | Sobe a API do back da legada em `http://127.0.0.1:5080` (Swagger em `/swagger`) |
+| `pnpm legacy:web` | Sobe o front da legada em `http://127.0.0.1:5081` (precisa da API no ar); escolha um usuário e abra um orçamento |
 | `pnpm legacy:test` | Testes da legada (xUnit + Testcontainers; precisa de Docker) |
 
 | Serviço | Porta local (padrão) | Configuração |
@@ -627,7 +629,7 @@ docs/adr/             decisões de arquitetura
 - [x] Gerador de dados determinístico
 - [x] Versão legada: modelo (EF Core, `decimal`), cálculo com o paliativo e carga dos dados
 - [x] Versão legada: API do back (busca por `LIKE`, bloqueio que expira, grupo inteiro, salvar o orçamento inteiro)
-- [ ] Versão legada: front Razor Pages intermediário, login simulado e telas em jQuery
+- [x] Versão legada: front Razor Pages intermediário, login simulado e telas em jQuery
 - [ ] API nova: Postgres → Redis → Elasticsearch
 - [ ] Front (React + Vite + TanStack Query)
 - [ ] Ambiente “VPS” e benchmark
