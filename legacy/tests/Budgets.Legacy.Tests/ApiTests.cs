@@ -24,9 +24,10 @@ public sealed class LegadoApiFixture : IAsyncLifetime
         var pasta = Path.Combine(SeedArquivos.RaizDoRepositorio(AppContext.BaseDirectory), "data", "seed", "small");
         await using (var db = NovoContexto()) await new Carregador(db).CarregarAsync(pasta);
 
-        // A API lê a connection string de LEGACY_DB (ver Conexao.DoAmbiente).
-        Environment.SetEnvironmentVariable("LEGACY_DB", _postgres.GetConnectionString());
-        Fabrica = new WebApplicationFactory<Program>();
+        // Cada instância da API recebe a sua connection string pela configuração, sem variável de
+        // ambiente: as classes de teste rodam em paralelo, cada uma com o seu Postgres.
+        Fabrica = new WebApplicationFactory<Program>()
+            .WithWebHostBuilder(b => b.UseSetting("ConnectionStrings:Legado", _postgres.GetConnectionString()));
     }
 
     public async Task DisposeAsync()
@@ -84,6 +85,22 @@ public class ApiTests(LegadoApiFixture api) : IClassFixture<LegadoApiFixture>
         Assert.NotNull((await outro.Content.ReadFromJsonAsync<Bloqueado>())?.AbertoPor);
         Assert.Equal(HttpStatusCode.OK, mesmoUsuario.StatusCode);
         Assert.Equal(HttpStatusCode.OK, depois.StatusCode);
+    }
+
+    [Fact]
+    public async Task Liberar_atrasado_de_uma_abertura_antiga_nao_solta_o_bloqueio_novo()
+    {
+        var id = await OrcamentoLivre();
+        var primeira = (await Cliente(1).GetFromJsonAsync<OrcamentoDetalhe>($"/api/orcamentos/{id}"))!;
+        await Task.Delay(5);
+        var segunda = (await Cliente(1).GetFromJsonAsync<OrcamentoDetalhe>($"/api/orcamentos/{id}"))!; // F5: nova abertura
+
+        // O "liberar" da primeira página chega depois que a segunda já abriu.
+        await Cliente(1).PostAsync($"/api/orcamentos/{id}/liberar?abertoEm={Uri.EscapeDataString(primeira.AbertoEm!.Value.ToString("O"))}", null);
+        var outro = await Cliente(2).GetAsync($"/api/orcamentos/{id}");
+
+        Assert.NotEqual(primeira.AbertoEm, segunda.AbertoEm);
+        Assert.Equal(HttpStatusCode.Locked, outro.StatusCode);
     }
 
     [Fact]

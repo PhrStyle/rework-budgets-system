@@ -72,18 +72,23 @@ public class OrcamentosController(OrcamentosContext db, IOptions<OpcoesBloqueio>
                 o.AjustePrazo, o.Margem, o.Total, o.OrcamentoPaiId,
                 o.Grupos.OrderBy(g => g.Ordem)
                     .Select(g => new GrupoResumo(g.Id, g.Nome, g.Categoria, g.Ordem, g.Subtotal, g.Itens.Count)).ToList(),
-                o.Filhos.OrderBy(f => f.Id).Select(f => new FilhoResumo(f.Id, f.Descricao, f.Total)).ToList()))
+                o.Filhos.OrderBy(f => f.Id).Select(f => new FilhoResumo(f.Id, f.Descricao, f.Total)).ToList(),
+                o.AbertoEm))
             .FirstAsync(ct);
         return detalhe;
     }
 
-    /// <summary>Libera o bloqueio (o front chama ao sair da tela).</summary>
+    /// <summary>
+    /// Libera o bloqueio (o front chama ao sair da tela). Com <paramref name="abertoEm"/>, só libera se o
+    /// bloqueio ainda for o daquela abertura: um "liberar" atrasado da página anterior (F5, outra aba)
+    /// não pode soltar o bloqueio que a página nova acabou de pegar.
+    /// </summary>
     [HttpPost("{id:int}/liberar")]
-    public async Task<IActionResult> Liberar(int id, CancellationToken ct)
+    public async Task<IActionResult> Liberar(int id, DateTime? abertoEm, CancellationToken ct)
     {
         if (UsuarioId is not int usuario) return BadRequest("Informe o usuário no cabeçalho X-Usuario-Id.");
         await db.Orcamentos
-            .Where(o => o.Id == id && o.AbertoPorId == usuario)
+            .Where(o => o.Id == id && o.AbertoPorId == usuario && (abertoEm == null || o.AbertoEm == abertoEm))
             .ExecuteUpdateAsync(s => s
                 .SetProperty(o => o.Aberto, false)
                 .SetProperty(o => o.AbertoPorId, (int?)null)
