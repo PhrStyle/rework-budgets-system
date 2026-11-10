@@ -7,20 +7,17 @@ export interface TestRedis {
   stop: () => Promise<void>;
 }
 
-/** Redis descartável com a mesma configuração do `redis-data` do compose: AOF e noeviction. */
-export async function startTestRedis(): Promise<TestRedis> {
+const CONFIG = {
+  // Como o `redis-data` do compose: AOF e noeviction (rascunhos não podem sumir).
+  data: ['--maxmemory-policy', 'noeviction', '--appendonly', 'yes', '--appendfsync', 'everysec'],
+  // Como o `redis-cache`: LRU e nenhuma persistência (só cópias reconstruíveis).
+  cache: ['--maxmemory', '64mb', '--maxmemory-policy', 'allkeys-lru', '--appendonly', 'no'],
+};
+
+/** Redis descartável com a mesma configuração da instância correspondente do compose. */
+export async function startTestRedis(kind: keyof typeof CONFIG = 'data'): Promise<TestRedis> {
   const container = await new GenericContainer('redis:8.8.4-alpine')
-    .withCommand([
-      'redis-server',
-      '--maxmemory-policy',
-      'noeviction',
-      '--appendonly',
-      'yes',
-      '--appendfsync',
-      'everysec',
-      '--save',
-      '',
-    ])
+    .withCommand(['redis-server', ...CONFIG[kind], '--save', ''])
     .withExposedPorts(6379)
     .withWaitStrategy(Wait.forLogMessage('Ready to accept connections'))
     .start();

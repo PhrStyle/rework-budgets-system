@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
+import { Redis } from 'ioredis';
 import pg from 'pg';
 
 import { loadDataset, readDataset } from './load.js';
@@ -22,6 +23,7 @@ const pool = new pg.Pool({ connectionString: databaseUrl() });
 const prisma = createPrisma();
 try {
   const loaded = await loadDataset(pool, dataset);
+  await flushCache();
   console.log(
     `carregado (${profile}): ${loaded.budgets} orçamentos, ${loaded.groups} grupos, ` +
       `${loaded.items} itens em ${loaded.ms} ms`,
@@ -43,4 +45,24 @@ try {
 } finally {
   await prisma.$disconnect();
   await pool.end();
+}
+
+/**
+ * Depois de recarregar do zero, ids e versões voltam a ser os mesmos: o cache antigo pareceria
+ * válido. Limpa o `redis-cache` (só cópias reconstruíveis). Sem ele no ar, segue em frente.
+ */
+async function flushCache(): Promise<void> {
+  const redis = new Redis(`redis://127.0.0.1:${process.env.REDIS_CACHE_PORT ?? '6379'}`, {
+    lazyConnect: true,
+    maxRetriesPerRequest: 0,
+  });
+  try {
+    await redis.connect();
+    await redis.flushdb();
+    console.log('redis-cache limpo');
+  } catch {
+    console.warn('redis-cache fora do ar: nada a limpar');
+  } finally {
+    redis.disconnect();
+  }
 }
