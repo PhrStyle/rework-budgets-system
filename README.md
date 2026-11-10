@@ -20,6 +20,7 @@
 
 - [Em 30 segundos](#em-30-segundos)
 - [Contexto](#contexto)
+- [Como o sistema chegou aqui](#como-o-sistema-chegou-aqui)
 - [Regras de negócio](#regras-de-negócio)
 - [Problemas e soluções](#problemas-e-soluções)
 - [Antiga × nova: números](#antiga--nova-números)
@@ -36,7 +37,7 @@
 
 ## Em 30 segundos
 
-- **Antes:** Razor Pages + jQuery + `localStorage`, com o orçamento inteiro recalculado no navegador, float no JS contra decimal no C#, e um sistema que era aceitável em dev e lento na VPS dos EUA.
+- **Antes:** um orçamento editado em três lugares (navegador, front em Razor e API), calculado em dois (JavaScript e C#, que não batiam), salvo inteiro, recarregado a cada mudança de margem e aceitável em dev, mas lento na VPS dos EUA.
 - **Depois:** a edição vai para um **rascunho no Redis** e só vira oficial em “Salvar alterações”; o servidor calcula com **inteiros**, por **delta**; a busca vai para o **Elasticsearch**; o front só exibe.
 - **Resultado:** ⟨1 frase com o principal ganho medido, ex.: “abrir um grupo de 5 mil itens: X s → Y ms no ambiente emulado da VPS”⟩.
 
@@ -58,6 +59,27 @@
 Assumi o sistema depois de **dois anos** de desenvolvimento por outra pessoa, já com várias decisões de arquitetura e de lógica que causavam os problemas abaixo. Este repositório é o registro de como eu os corrigiria.
 
 > O sistema antigo é reproduzido aqui **de forma genérica**, com dados fictícios. Não é o código original.
+
+---
+
+## Como o sistema chegou aqui
+
+As regras do sistema antigo são confusas, e **essa confusão é o problema**. Ninguém projetaria de propósito um orçamento calculado em parte no navegador e em parte no servidor, salvo inteiro a cada 5 minutos e recarregado a cada mudança de margem. Ele chegou a isso aos poucos: cada decisão fazia sentido para resolver o sintoma da anterior, e criava o próximo.
+
+```mermaid
+flowchart TD
+  A["11 · Salvar a cada alteração,<br/>enviando o orçamento inteiro"] -->|lento demais| B["1 · 2 · Editar em sessão no navegador:<br/>cálculo em JS, lazy loading, localStorage"]
+  B -->|o navegador não tem os grupos fechados| C["4 · 8 · Parte do cálculo no back:<br/>a mesma regra em JS e em C#"]
+  C -->|float e decimal não batem| D["4 · Arredondar sempre para cima"]
+  C -->|mudanças globais| E["14 · Recarregar a página<br/>e recalcular no back"]
+  B -->|fechou o navegador, perdeu tudo| F["12 · Salvamento automático<br/>a cada 5 minutos"]
+  F -->|grava o que era simulação| G["12 · Simulações salvas sem querer"]
+  B -->|cada aba com seu estado| H["10 · Abas sobrescrevendo uma à outra"]
+```
+
+Os números são os dos [problemas](#problemas-e-soluções). Os demais (3, 5, 6, 7, 9 e 13) não nascem dessa cadeia, mas somavam a ela: busca lenta, totais de orçamentos vinculados defasados, um ambiente de produção muito mais lento que o de desenvolvimento, uma tela difícil de manter, deploys que quebravam o front em cache e um caminho dobrado entre o navegador e a API.
+
+A versão nova não corrige um paliativo de cada vez: **ela desfaz a cadeia na origem**. O cálculo fica num lugar só (o servidor, com inteiros), a edição vai para um rascunho no servidor, e salvar grava só o que mudou. Sem a primeira caixa, as outras deixam de ser necessárias.
 
 ---
 
@@ -86,22 +108,41 @@ As duas versões implementam as mesmas regras; só muda **como**.
 
 ## Problemas e soluções
 
-| # | Problema (antes) | Impacto | Solução (agora) | Tecnologia | Resultado |
-|---|---|---|---|---|---|
-| 1 | Orçamento inteiro recalculado no navegador a cada alteração (jQuery) | Tela travando com milhares de itens | Cálculo no servidor, incremental por **delta** | NestJS · Redis | — |
-| 2 | Lazy loading de grupos com cache em `localStorage` | Cache por navegador, com cota, sem invalidação | Orçamento quente no **Redis** (cache-aside) + itens paginados | Redis | — |
-| 3 | Busca e filtro de orçamentos ⟨como era⟩ | ⟨lentidão / filtros limitados⟩ | Índice de busca atualizado por fila | Elasticsearch · BullMQ | — |
-| 4 | Float no JS × decimal no C#; paliativo: arredondar sempre para cima em todo cálculo | Valor na tela ≠ valor gravado; totais enviesados para cima | Dinheiro em **inteiros** (centavos, pontos-base), uma só implementação, arredondamento padrão só nas divisões; o paliativo sai | `packages/money` · Vitest | — |
-| 5 | Orçamento dentro de orçamento (1 nível) alterando o cálculo | ⟨total do pai defasado / regra espalhada⟩ | Servidor valida a profundidade e soma o total atual dos filhos | NestJS · Prisma | — |
-| 6 | Aceitável em dev, lento na VPS dos EUA | Latência e CPU de produção invisíveis no dev | Projeto pensado para latência; benchmark em ambiente que emula a VPS | Docker · Toxiproxy · k6 | — |
-| 7 | Tela complexa em jQuery (inserir acima/abaixo, reordenar) misturada ao cálculo | Difícil de manter e de evoluir | Front só exibe estado; reordenação por índice fracionário | ⟨front⟩ | — |
-| 8 | Sem testes no front, justamente onde ficava o cálculo (a parte mais crítica) | Regressões em valores só apareciam em uso | Cálculo em funções puras de TypeScript, compartilhadas e cobertas por testes | `packages/money` · Vitest | — |
-| 9 | Após cada deploy, o navegador usava o JS antigo em cache com o back-end novo; solução era Ctrl+F5 | Telas quebradas que pareciam bugs; perda de confiança no time | Arquivos com hash no nome, `index.html` sem cache, versão da API checada pelo front, contratos compartilhados | Vite · `packages/contracts` | — |
-| 10 | Orçamento marcado como "aberto" no banco para bloquear outros usuários; o mesmo usuário em várias abas ficava com estados divergentes | Abas desatualizadas salvando por cima uma da outra | Rascunho único por usuário no servidor, compartilhado pelas abas; bloqueio com expiração preso ao rascunho | Redis · TanStack Query | — |
-| 11 | Salvar enviava o orçamento **inteiro** (ex.: 12 grupos e 500+ produtos para mudar um) | Salvamentos lentos e transações enormes para mudanças pequenas | Salvar grava só o *changeset* do rascunho, numa transação | NestJS · Postgres · Redis | — |
-| 12 | Edições só na página e no `localStorage` até salvar; para não perder trabalho, salvamento automático a cada 5 minutos | Queda de energia ou navegador fechado perdia o progresso; o salvamento automático gravava simulações indesejadas | Rascunho no servidor (Redis) e botão “Salvar alterações”; sem salvamento automático | Redis · NestJS | — |
-| 13 | O jQuery chamava o front (Razor), que chamava a API do back, e a resposta fazia o caminho de volta | Cada chamada atravessava dois servidores e duas serializações; endpoints e DTOs duplicados nos dois projetos | O navegador chama uma API só, com contratos compartilhados em TypeScript | NestJS · `packages/contracts` | — |
-| 14 | Mudar margem, ajuste de prazo (dilação) ou salvar exigia recarregar a página e recalcular no back, porque o front não tinha os grupos fechados | Fluxo de trabalho interrompido a cada mudança global | O servidor recalcula a partir dos subtotais e devolve o total; a tela atualiza só o necessário, sem recarregar | NestJS · TanStack Query · `budget-calc` | — |
+Agrupados por tema; os números são os mesmos dos estudos de caso e do diagrama acima.
+
+### Cálculo
+
+| # | Problema (antes) | Impacto | Solução (agora) | Resultado |
+|---|---|---|---|---|
+| 1 | Orçamento inteiro recalculado no navegador a cada alteração (jQuery lendo e escrevendo o DOM) | Tela travando com milhares de itens | Cálculo no servidor, incremental por **delta** | — |
+| 4 | A mesma regra em JS (float) e em C# (decimal), cada lado calculando uma parte; paliativo: arredondar sempre para cima | Valor na tela ≠ valor gravado; totais enviesados para cima | Dinheiro em **inteiros**, uma só implementação, arredondamento comercial só nas divisões | R$ 988,32 a mais na base de exemplo → R$ 0,00 |
+| 8 | Sem testes no front, justamente onde estava parte do cálculo | Erros de valor só apareciam em uso | Cálculo em funções puras de TypeScript, cobertas por testes | 0 → 58 testes |
+| 14 | Mudar margem, ajuste de prazo (dilação) ou salvar recarregava a página para o back recalcular | Fluxo de trabalho interrompido a cada mudança global | O servidor recalcula a partir dos subtotais; a tela atualiza sem recarregar | — |
+| 5 | Orçamento dentro de orçamento (1 nível): o pai guardava uma cópia do total do filho | Total do pai defasado | O servidor valida a profundidade e soma o total atual dos filhos | — |
+
+### Carregar e salvar
+
+| # | Problema (antes) | Impacto | Solução (agora) | Resultado |
+|---|---|---|---|---|
+| 11 | Salvar enviava o orçamento **inteiro** (ex.: 12 grupos e 500+ produtos para mudar um) | Salvamentos lentos e transações enormes | Salvar grava só o *changeset* do rascunho, numa transação | — |
+| 2 | Lazy loading de grupos com cache em `localStorage` | Cache por navegador, com cota e sem invalidação | Itens paginados; cópias no **Redis** com invalidação | — |
+| 12 | Edição só na página até salvar; para não perder trabalho, salvamento automático a cada 5 min | Queda de energia perdia o progresso; o automático gravava simulações | Rascunho no servidor e “Salvar alterações”; sem salvamento automático | — |
+
+### Edição e concorrência
+
+| # | Problema (antes) | Impacto | Solução (agora) | Resultado |
+|---|---|---|---|---|
+| 10 | Bloqueio “aberto” no banco entre usuários; o mesmo usuário em várias abas, cada uma com seu estado | Abas desatualizadas salvando por cima uma da outra | Um rascunho por usuário no servidor, compartilhado pelas abas, segurando o bloqueio | — |
+| 7 | Tela complexa em jQuery (inserir acima/abaixo, reordenar) misturada ao cálculo | Difícil de manter e de evoluir | O front só exibe o estado; reordenar muda uma posição | — |
+
+### Arquitetura e operação
+
+| # | Problema (antes) | Impacto | Solução (agora) | Resultado |
+|---|---|---|---|---|
+| 13 | jQuery → front (Razor) → API → front → jQuery | Dois servidores e duas serializações por chamada; endpoints e DTOs duplicados | O navegador chama uma API só, com contratos compartilhados | — |
+| 6 | Aceitável em dev, lento na VPS dos EUA | Latência e CPU de produção invisíveis no dev | Projeto pensado para latência; benchmark num ambiente que emula a VPS | — |
+| 3 | Busca e filtro de orçamentos ⟨como era⟩ | ⟨lentidão / filtros limitados⟩ | Índice de busca (Elasticsearch) atualizado por fila | — |
+| 9 | Depois de cada deploy, o navegador usava o JS antigo com o back novo; a saída era Ctrl+F5 | Telas quebradas que pareciam bugs; perda de confiança no time | Arquivos com hash no nome, aviso de nova versão, contratos compartilhados | — |
 
 ### Por que trocar de stack?
 
