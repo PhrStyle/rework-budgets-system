@@ -245,16 +245,29 @@ Uma edição vai só para o rascunho do usuário no Redis, e a API devolve os to
 
 ### 2. Lazy loading com `localStorage`
 
-- **Problema:** ⟨Para não trazer milhares de produtos, abria-se só o cabeçalho e os títulos/valores dos grupos; ao abrir um grupo, ele ficava no `localStorage`.⟩
-- **Impacto:** ⟨Cache por navegador, cota de ~5 MB, sem invalidação: dados desatualizados sem aviso.⟩
+- **Problema:** Para não trazer o orçamento inteiro, a tela abria só o cabeçalho e o resumo dos grupos; ao abrir um grupo, os itens vinham do servidor e ficavam guardados no `localStorage` do navegador.
+- **Impacto:** O cache ficava num navegador só, sem validação nem invalidação: um grupo aberto de novo vinha do `localStorage`, mesmo que alguém tivesse salvo outra versão. Na reprodução, cada salvamento regrava os grupos com ids novos e deixa as chaves antigas para trás.
 - **Solução:**
-  - ⟨Orçamento quente no Redis: resumo + itens por grupo, cache-aside na leitura, invalidação na escrita, TTL⟩
-  - Itens paginados por cursor na posição (`after`), estável mesmo com inserções; a posição é única no grupo
+  - Itens paginados por cursor na posição (`after`), estável mesmo com inserções; a posição é única no grupo.
+  - **Cache-aside no servidor** (`redis-cache`, LRU, sem persistência), com a **versão na chave**: `group:770:v3:items` e `budget:156:u<hora da última gravação>`. Salvar sobe a versão, e a leitura seguinte procura outra chave. Não há “apagar do cache ao salvar”, nem a corrida em que uma leitura lenta regrava o valor velho logo depois; a chave antiga só deixa de ser lida e o LRU a despeja.
+  - O cache **nunca derruba uma leitura**: Redis fora do ar ou lento (> 200 ms) vira um “erro” na métrica e a resposta vem do Postgres, com um aviso no log por intervalo, não um por requisição.
+  - **Conferência de drift** (`pnpm v2:check`): recalcula do zero cada total guardado, a partir dos itens, e aponta o que divergir.
 
 - **Resultado:**
 
 | Métrica | Antes | Depois |
 |---|---|---|
+| Ler o maior grupo do pior caso real (87 itens) · só a API, mesma máquina | ~2 ms (sem cache no servidor) | ~6 ms sem cache → **~2,7 ms** com cache |
+| Abrir o cabeçalho e o resumo dos grupos · só a API, mesma máquina | — | ~5 ms sem cache → **~2,3 ms** com cache |
+| Dado velho depois de salvar | sem validação; chaves órfãs (15 no pior caso) | nenhum (versão na chave; teste automatizado) |
+| `redis-cache` fora do ar | — | leituras seguem pelo Postgres (~4,4 ms), 1 aviso no log |
+| Armazenamento no navegador | grupos inteiros no `localStorage` | 0 B |
+| Taxa de acerto do cache com uso real | — | ⟨medida no benchmark, etapa 9⟩ |
+
+- **Trade-offs:** O cache guarda o grupo inteiro e pagina em memória: um grupo enorme custa uma chave grande (357 itens ≈ 60 KB no perfil de estresse). O detalhe ainda faz uma consulta curta ao Postgres para saber a versão (a hora da última gravação) antes de ir ao cache. Localmente o ganho é pequeno em valor absoluto; ele importa com carga e com o banco mais longe, o que a etapa 9 mede.
+- **Onde ver:** legada: `carregarItens()` em [`orcamento.js`](legacy/src/Budgets.Legacy.Web/wwwroot/js/orcamento.js). Reproduzido: como o salvar apaga e regrava os grupos com ids novos, o `localStorage` fica com chaves de grupos que não existem mais (15 chaves órfãs depois de um salvamento no pior caso) · nova: [`cache.ts`](apps/api/src/cache/cache.ts), uso em [`budgets.service.ts`](apps/api/src/budgets/budgets.service.ts), testes em [`cache.test.ts`](apps/api/src/cache/cache.test.ts) (inclusive com o Redis derrubado no meio), métricas em `GET /api/metrics`
+
+---|---|---|
 | Abrir grupo de 5.000 itens | — | — |
 | Hit ratio do cache | — | — |
 | Armazenamento no navegador | — | 0 B |
@@ -543,7 +556,7 @@ Reproduzir:
 | TanStack Query | Estado vindo do servidor no front | ⟨…⟩ |
 | NestJS (sobre Fastify) | API REST | Módulos e injeção de dependência deixam a API testável por partes; o Nest 12 valida a entrada com os mesmos schemas Zod que a tela vai usar. Fastify pelo logger pino embutido e pelo `inject` (testes sem rede) |
 | PostgreSQL + Prisma | Fonte da verdade | Schema e migrations versionados, tipos gerados a partir do banco; o que o Prisma não modela (`CHECK` com os limites das regras) fica na migration ([ADR 0005](docs/adr/0005-modelo-de-dados-da-versao-nova.md)) |
-| Redis | Rascunhos de edição, cache, totais atômicos e filas (BullMQ), em duas instâncias: `redis-data` e `redis-cache` | ⟨…⟩ |
+| Redis | Rascunhos de edição (que seguram o bloqueio), cache e filas (BullMQ), em duas instâncias: `redis-data` e `redis-cache` | Duas instâncias porque cache pode ser despejado e rascunho não: LRU sem persistência num, `noeviction` + AOF no outro |
 | Elasticsearch | Listagem, filtros e autocomplete | ⟨…⟩ |
 | Vitest | Testes unitários e de integração | ⟨…⟩ |
 | Docker Compose | Ambiente local e ambiente “VPS” | ⟨…⟩ |
@@ -579,6 +592,7 @@ pnpm test
 | `pnpm legacy:web` | Sobe o front da legada em `http://127.0.0.1:5081` (precisa da API no ar); escolha um usuário e abra um orçamento |
 | `pnpm legacy:test` | Testes da legada (xUnit + Testcontainers; precisa de Docker) |
 | `pnpm v2:api` | Sobe a API nova em `http://127.0.0.1:3000/api` (porta em `API_PORT`), com logs de uma linha por requisição e o `x-request-id` na resposta |
+| `pnpm v2:check` | Conferência de drift: recalcula do zero cada total guardado e aponta divergências |
 | `pnpm v2:seed full` | Aplica as migrations (Prisma) e carrega os dados no banco da versão nova (`budgets_v2`); relê tudo pelo Prisma e confere cada total com o gerador |
 
 | Serviço | Porta local (padrão) | Configuração |
@@ -637,7 +651,8 @@ docs/adr/             decisões de arquitetura
 - [x] API nova: modelo de dados (Prisma, inteiros, `CHECK` com os limites) e carga conferida centavo por centavo
 - [x] API nova: leitura (NestJS + Fastify): listagem, detalhe sem itens, itens por página, contratos em Zod e logs com o ID da requisição
 - [x] API nova: rascunho no Redis (segura o bloqueio), edição por delta e “Salvar alterações” gravando só o changeset
-- [ ] API nova: Redis → Elasticsearch
+- [x] API nova: cache no `redis-cache` com a versão na chave, métricas e conferência de drift
+- [ ] API nova: Elasticsearch e fila (BullMQ)
 - [ ] Front (React + Vite + TanStack Query)
 - [ ] Ambiente “VPS” e benchmark
 - [ ] README preenchido com os números

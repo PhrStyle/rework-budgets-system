@@ -5,6 +5,7 @@
   "type": "module",
   "description": "API da versão nova: NestJS, Prisma (Postgres) e rascunho de edição no Redis.",
   "scripts": {
+    "check": "tsx src/db/check-cli.ts",
     "dev": "tsx watch src/main.ts",
     "generate": "prisma generate",
     "seed": "tsx src/db/seed-cli.ts",
