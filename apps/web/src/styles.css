@@ -615,3 +615,46 @@ tbody tr:hover td {
     flex: 1;
   }
 }
+
+/* edição (8b) */
+.barra.fixa {
+  position: sticky;
+  top: 57px;
+  z-index: 15;
+  box-shadow: var(--shadow);
+}
+.barra .erro {
+  flex-basis: 100%;
+  color: var(--bad);
+  font-size: 13.5px;
+}
+input.invalido {
+  border-color: var(--bad);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 18%, transparent);
+}
+.it input {
+  width: 100%;
+  text-align: right;
+  padding: 6px 9px;
+}
+.sugestoes li.ativo {
+  background: var(--accent-soft);
+}
+.g-head .remover-grupo {
+  border: 0;
+  background: none;
+  color: var(--muted);
+  padding: 2px 6px;
+}
+.g-head .remover-grupo:hover {
+  color: var(--bad);
+}
+.novo-grupo {
+  display: flex;
+  gap: 10px;
+  padding: 12px 16px;
+  align-items: center;
+}
+.novo-grupo input {
+  flex: 1;
+}
