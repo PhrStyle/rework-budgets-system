@@ -53,13 +53,17 @@ function deployVersion(): Plugin {
 export default defineConfig({
   plugins: [react(), deployVersion()],
   define: { __APP_VERSION__: JSON.stringify(version) },
+  // Endereço fixo em IPv4: "localhost" pode resolver para ::1 (IPv6) em algumas máquinas, como o
+  // runner do CI, e aí quem espera em 127.0.0.1 (o Playwright) nunca encontra o servidor.
   server: {
+    host: '127.0.0.1',
     port: 5173,
     strictPort: true,
     // A tela e a API na mesma origem: sem CORS, e o navegador fala com uma API só (problema 13).
     proxy: { '/api': 'http://127.0.0.1:3000' },
   },
   preview: {
+    host: '127.0.0.1',
     port: 4173,
     strictPort: true,
     proxy: { '/api': 'http://127.0.0.1:3000' },

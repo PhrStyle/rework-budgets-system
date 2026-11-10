@@ -25,12 +25,15 @@ export default defineConfig({
       command: 'pnpm --filter @budgets/api start',
       url: 'http://127.0.0.1:3000/api/health',
       reuseExistingServer: !process.env.CI,
+      // A saída dos servidores vai para o log: se um não subir no CI, dá para ver por quê.
+      stdout: 'pipe',
       timeout: 120_000,
     },
     {
       command: 'pnpm build && pnpm preview',
       url: 'http://127.0.0.1:4173',
       reuseExistingServer: !process.env.CI,
+      stdout: 'pipe',
       timeout: 120_000,
     },
   ],
