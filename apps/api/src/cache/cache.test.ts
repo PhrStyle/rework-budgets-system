@@ -18,7 +18,12 @@ async function metric(cache: string, result: 'hit' | 'miss' | 'error'): Promise<
   const text = (await env.request('GET', '/metrics')).body;
   const line = text
     .split('\n')
-    .find((l) => l.startsWith(`budgets_cache_requests_total{cache="${cache}",result="${result}"}`));
+    .find(
+      (l) =>
+        l.startsWith('budgets_cache_requests_total{') &&
+        l.includes(`cache="${cache}"`) &&
+        l.includes(`result="${result}"`),
+    );
   return Number(line?.split(' ').at(-1) ?? 0);
 }
 

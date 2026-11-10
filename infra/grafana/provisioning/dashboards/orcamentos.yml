@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: orcamentos
+    folder: Orçamentos
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards

@@ -202,6 +202,16 @@ describe('worker', () => {
     const doc = await waitFor(() => indexer.upserts.find((d) => d.id === b.id));
     expect(doc).toMatchObject({ description: 'Reforma do auditório', totalCents: total });
     expect((await pending([b.id])).length).toBe(0);
+
+    // E as métricas para o Prometheus: indexação, atraso, fila e outbox.
+    const w = running.at(-1);
+    const text = (await w?.metrics.registry.metrics()) ?? '';
+    expect(text).toMatch(/^budgets_search_index_total\{result="ok",service="worker"\} [1-9]/m);
+    expect(text).toMatch(/^budgets_search_index_lag_seconds_count\{service="worker"\} [1-9]/m);
+    expect(text).toMatch(
+      /^budgets_queue_jobs\{queue="search",state="waiting",service="worker"\} \d+/m,
+    );
+    expect(text).toMatch(/^budgets_outbox_pending\{service="worker"\} \d+/m);
   });
 
   it('com o destino fora do ar, tenta de novo até conseguir', async () => {

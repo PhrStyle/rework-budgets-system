@@ -1,0 +1,93 @@
+# Regras de alerta: o que merece alguém olhar. Cada uma diz o porquê e o que conferir primeiro.
+# (Sem Alertmanager aqui: os alertas aparecem em http://127.0.0.1:9090/alerts. Em produção, ele
+# mandaria para e-mail ou Slack.)
+groups:
+  - name: orcamentos
+    rules:
+      - alert: ApiForaDoAr
+        expr: up{job="api"} == 0
+        for: 1m
+        labels: { severidade: critica }
+        annotations:
+          resumo: A API não responde à coleta há 1 minuto.
+
+      - alert: WorkerForaDoAr
+        expr: up{job="worker"} == 0
+        for: 2m
+        labels: { severidade: alta }
+        annotations:
+          resumo: >-
+            O worker não responde. Os avisos de mudança esperam no outbox (nada se perde), mas a
+            busca para de refletir os salvamentos.
+
+      - alert: ErrosNaApi
+        expr: |
+          sum(rate(http_request_duration_seconds_count{status_code=~"5.."}[5m]))
+            / sum(rate(http_request_duration_seconds_count[5m])) > 0.01
+        for: 5m
+        labels: { severidade: alta }
+        annotations:
+          resumo: Mais de 1% das respostas são 5xx. Os detalhes de cada erro estão no Sentry.
+
+      - alert: SalvarLento
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(
+            http_request_duration_seconds_bucket{route="/api/budgets/:id/draft/save"}[5m]))) > 1
+        for: 5m
+        labels: { severidade: media }
+        annotations:
+          resumo: O p95 de "Salvar alterações" passou de 1 s (no benchmark, fica perto de 0,2 s).
+
+      - alert: BuscaNoPostgres
+        expr: sum(rate(budgets_search_requests_total{engine="postgres_fallback"}[1m])) > 0
+        for: 1m
+        labels: { severidade: media }
+        annotations:
+          resumo: >-
+            A busca está caindo para o Postgres: o Elasticsearch não responde. A tela funciona, mas
+            sem tolerância a acento e a erro de digitação.
+
+      - alert: OutboxParado
+        expr: budgets_outbox_pending > 50
+        for: 2m
+        labels: { severidade: media }
+        annotations:
+          resumo: Avisos acumulando no outbox. Conferir o relay e a conexão do worker com o Redis.
+
+      - alert: FilaAcumulando
+        expr: budgets_queue_jobs{state="waiting"} > 100
+        for: 5m
+        labels: { severidade: media }
+        annotations:
+          resumo: Tarefas esperando na fila {{ $labels.queue }}. O worker não está dando conta.
+
+      - alert: BuscaAtrasada
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(budgets_search_index_lag_seconds_bucket[5m]))) > 10
+        for: 5m
+        labels: { severidade: media }
+        annotations:
+          resumo: A busca leva mais de 10 s para refletir um salvamento (normal fica perto de 1 s).
+
+      - alert: IndexacaoFalhando
+        expr: increase(budgets_search_index_total{result="failed"}[15m]) > 0
+        labels: { severidade: media }
+        annotations:
+          resumo: Tarefas de indexação esgotaram as tentativas. Estão na fila "failed", com o erro.
+
+      - alert: DriftEncontrado
+        expr: budgets_drift_mismatches > 0
+        labels: { severidade: alta }
+        annotations:
+          resumo: >-
+            A conferência de drift achou totais guardados diferentes do recálculo a partir dos
+            itens. Rodar pnpm v2:check para ver quais.
+
+      - alert: EventLoopTravando
+        expr: nodejs_eventloop_lag_p99_seconds > 0.1
+        for: 5m
+        labels: { severidade: media }
+        annotations:
+          resumo: >-
+            O event loop do {{ $labels.service }} atrasa mais de 100 ms: trabalho de CPU está
+            segurando as requisições.

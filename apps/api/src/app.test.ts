@@ -138,6 +138,30 @@ describe('itens de um grupo', () => {
   });
 });
 
+describe('métricas para o Prometheus', () => {
+  it('latência por rota, pelo modelo da rota (não por id), e as métricas do processo', async () => {
+    await get('/budgets/42');
+    await get('/budgets/43');
+    await get('/nao-existe');
+    const text = (await get('/metrics')).body;
+
+    const series = (route: string, status: string) =>
+      text
+        .split('\n')
+        .find(
+          (l) =>
+            l.startsWith('http_request_duration_seconds_count{') &&
+            l.includes(`route="${route}"`) &&
+            l.includes(`status_code="${status}"`),
+        );
+    expect(Number(series('/api/budgets/:id', '200')?.split(' ').at(-1))).toBeGreaterThanOrEqual(2);
+    expect(series('nao_encontrada', '404')).toBeDefined();
+    expect(text).not.toContain('route="/api/budgets/42"'); // um id por série não escala
+    expect(text).toMatch(/^process_cpu_seconds_total\{service="api"\}/m);
+    expect(text).toMatch(/^nodejs_eventloop_lag_p99_seconds\{service="api"\}/m);
+  });
+});
+
 describe('catálogo e operação', () => {
   it('autocomplete de produtos por nome ou SKU', async () => {
     const product = db.dataset.products[0];
