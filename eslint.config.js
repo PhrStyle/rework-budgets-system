@@ -31,6 +31,8 @@ export default tseslint.config(
       '@typescript-eslint/no-floating-promises': 'error',
       // Números em template strings são comuns em mensagens de erro e logs.
       '@typescript-eslint/restrict-template-expressions': ['error', { allowNumber: true }],
+      // Módulos do Nest são classes vazias com decorator.
+      '@typescript-eslint/no-extraneous-class': ['error', { allowWithDecorator: true }],
     },
   },
   {

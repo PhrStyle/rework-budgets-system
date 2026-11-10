@@ -239,7 +239,7 @@ Uma edição vai só para o rascunho do usuário no Redis, e a API devolve os to
 | Tempo até a tela atualizar | — | — |
 
 - **Trade-offs:** ⟨Toda edição paga o RTT até o servidor; resposta otimista possível porque o cálculo é inteiro e determinístico.⟩
-- **Onde ver:** legada: `recalcular()` em [`orcamento.js`](legacy/src/Budgets.Legacy.Web/wwwroot/js/orcamento.js), que lê o texto “R$ 1.234,56” de volta do DOM · regra nova: [`packages/budget-calc`](packages/budget-calc/src/calc.ts) (`calcFromSubtotals`, `itemDelta`) · ⟨uso na API: `apps/api/…`⟩
+- **Onde ver:** legada: `recalcular()` em [`orcamento.js`](legacy/src/Budgets.Legacy.Web/wwwroot/js/orcamento.js), que lê o texto “R$ 1.234,56” de volta do DOM · regra nova: [`packages/budget-calc`](packages/budget-calc/src/calc.ts) (`calcFromSubtotals`, `itemDelta`) · na API: o detalhe do orçamento sai dos subtotais guardados, sem ler itens, em [`budgets.service.ts`](apps/api/src/budgets/budgets.service.ts)
 
 ---
 
@@ -249,7 +249,7 @@ Uma edição vai só para o rascunho do usuário no Redis, e a API devolve os to
 - **Impacto:** ⟨Cache por navegador, cota de ~5 MB, sem invalidação: dados desatualizados sem aviso.⟩
 - **Solução:**
   - ⟨Orçamento quente no Redis: resumo + itens por grupo, cache-aside na leitura, invalidação na escrita, TTL⟩
-  - ⟨Itens paginados por cursor⟩
+  - Itens paginados por cursor na posição (`after`), estável mesmo com inserções; a posição é única no grupo
 
 - **Resultado:**
 
@@ -260,7 +260,7 @@ Uma edição vai só para o rascunho do usuário no Redis, e a API devolve os to
 | Armazenamento no navegador | — | 0 B |
 
 - **Trade-offs:** ⟨Consistência Redis × Postgres: Postgres sempre ganha; job que recalcula do zero e mede drift.⟩
-- **Onde ver:** legada: `carregarItens()` em [`orcamento.js`](legacy/src/Budgets.Legacy.Web/wwwroot/js/orcamento.js). Reproduzido: como o salvar apaga e regrava os grupos com ids novos, o `localStorage` fica com chaves de grupos que não existem mais (15 chaves órfãs depois de um salvamento no pior caso) · ⟨nova: …⟩
+- **Onde ver:** legada: `carregarItens()` em [`orcamento.js`](legacy/src/Budgets.Legacy.Web/wwwroot/js/orcamento.js). Reproduzido: como o salvar apaga e regrava os grupos com ids novos, o `localStorage` fica com chaves de grupos que não existem mais (15 chaves órfãs depois de um salvamento no pior caso) · nova: `GET /api/budgets/:id/groups/:groupId/items` em [`budgets.controller.ts`](apps/api/src/budgets/budgets.controller.ts)
 
 ---
 
@@ -489,7 +489,7 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 | Tempo de uma edição (ambiente “VPS”) | — | — |
 
 - **Trade-offs:** ⟨Com o front como aplicação estática, a API precisa cuidar de CORS e de autenticação diretamente.⟩
-- **Onde ver:** legada: [`Intermediario.cs`](legacy/src/Budgets.Legacy.Web/Intermediario.cs) (endpoints `/front/...` que repassam à API) e os DTOs duplicados em [`Modelos.cs`](legacy/src/Budgets.Legacy.Web/Modelos.cs). O cabeçalho `Server-Timing` mostra no DevTools o tempo de cada salto · ⟨nova: …⟩
+- **Onde ver:** legada: [`Intermediario.cs`](legacy/src/Budgets.Legacy.Web/Intermediario.cs) (endpoints `/front/...` que repassam à API) e os DTOs duplicados em [`Modelos.cs`](legacy/src/Budgets.Legacy.Web/Modelos.cs). O cabeçalho `Server-Timing` mostra no DevTools o tempo de cada salto · nova: contratos com validação em [`packages/contracts`](packages/contracts/src/index.ts), usados direto nos controllers ([`budgets.controller.ts`](apps/api/src/budgets/budgets.controller.ts))
 
 ---
 
@@ -540,8 +540,8 @@ Reproduzir:
 | TypeScript + Node.js | API, workers, front | Uma linguagem nos dois lados; tipos, contratos e cálculo compartilhados |
 | React + Vite | Tela | ⟨…⟩ |
 | TanStack Query | Estado vindo do servidor no front | ⟨…⟩ |
-| NestJS | API REST | ⟨…⟩ |
-| PostgreSQL + Prisma | Fonte da verdade | ⟨…⟩ |
+| NestJS (sobre Fastify) | API REST | Módulos e injeção de dependência deixam a API testável por partes; o Nest 12 valida a entrada com os mesmos schemas Zod que a tela vai usar. Fastify pelo logger pino embutido e pelo `inject` (testes sem rede) |
+| PostgreSQL + Prisma | Fonte da verdade | Schema e migrations versionados, tipos gerados a partir do banco; o que o Prisma não modela (`CHECK` com os limites das regras) fica na migration ([ADR 0005](docs/adr/0005-modelo-de-dados-da-versao-nova.md)) |
 | Redis | Rascunhos de edição, cache, totais atômicos e filas (BullMQ), em duas instâncias: `redis-data` e `redis-cache` | ⟨…⟩ |
 | Elasticsearch | Listagem, filtros e autocomplete | ⟨…⟩ |
 | Vitest | Testes unitários e de integração | ⟨…⟩ |
@@ -577,6 +577,7 @@ pnpm test
 | `pnpm legacy:api` | Sobe a API do back da legada em `http://127.0.0.1:5080` (Swagger em `/swagger`) |
 | `pnpm legacy:web` | Sobe o front da legada em `http://127.0.0.1:5081` (precisa da API no ar); escolha um usuário e abra um orçamento |
 | `pnpm legacy:test` | Testes da legada (xUnit + Testcontainers; precisa de Docker) |
+| `pnpm v2:api` | Sobe a API nova em `http://127.0.0.1:3000/api` (porta em `API_PORT`), com logs de uma linha por requisição e o `x-request-id` na resposta |
 | `pnpm v2:seed full` | Aplica as migrations (Prisma) e carrega os dados no banco da versão nova (`budgets_v2`); relê tudo pelo Prisma e confere cada total com o gerador |
 
 | Serviço | Porta local (padrão) | Configuração |
@@ -633,7 +634,8 @@ docs/adr/             decisões de arquitetura
 - [x] Versão legada: API do back (busca por `LIKE`, bloqueio que expira, grupo inteiro, salvar o orçamento inteiro)
 - [x] Versão legada: front Razor Pages intermediário, login simulado e telas em jQuery
 - [x] API nova: modelo de dados (Prisma, inteiros, `CHECK` com os limites) e carga conferida centavo por centavo
-- [ ] API nova: leitura, rascunho no Redis e salvar só o que mudou
+- [x] API nova: leitura (NestJS + Fastify): listagem, detalhe sem itens, itens por página, contratos em Zod e logs com o ID da requisição
+- [ ] API nova: rascunho no Redis e salvar só o que mudou
 - [ ] API nova: Redis → Elasticsearch
 - [ ] Front (React + Vite + TanStack Query)
 - [ ] Ambiente “VPS” e benchmark

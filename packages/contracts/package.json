@@ -1,0 +1,16 @@
+{
+  "name": "@budgets/contracts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Contratos da API nova: validação da entrada (Zod) e formato das respostas, usados pela API e pela tela.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  }
+}

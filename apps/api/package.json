@@ -5,23 +5,36 @@
   "type": "module",
   "description": "API da versão nova: NestJS, Prisma (Postgres) e rascunho de edição no Redis.",
   "scripts": {
+    "dev": "tsx watch src/main.ts",
     "generate": "prisma generate",
     "seed": "tsx src/db/seed-cli.ts",
+    "start": "tsx src/main.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@budgets/budget-calc": "workspace:*",
+    "@budgets/contracts": "workspace:*",
     "@budgets/money": "workspace:*",
     "@budgets/seed": "workspace:*",
+    "@nestjs/common": "12.4.0",
+    "@nestjs/core": "12.4.0",
+    "@nestjs/platform-fastify": "12.4.0",
     "@prisma/adapter-pg": "7.10.1",
     "@prisma/client": "7.10.1",
+    "fastify": "5.12.8",
+    "nestjs-pino": "^5.3.1",
     "pg": "^8.23.1",
-    "prisma": "7.10.1"
+    "pino": "^10.4.0",
+    "pino-http": "^11.0.0",
+    "prisma": "7.10.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2"
   },
   "devDependencies": {
     "@testcontainers/postgresql": "12.2.1",
     "@types/node": "^22.20.5",
     "@types/pg": "^8.23.1",
+    "pino-pretty": "^13.2.0",
     "tsx": "^4.23.15"
   }
 }
