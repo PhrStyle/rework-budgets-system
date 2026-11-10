@@ -1,5 +1,5 @@
 import { Controller, Get, Headers, Inject, Param, Query } from '@nestjs/common';
-import { budgetListQuery, groupItemsQuery, idParam } from '@budgets/contracts';
+import { budgetListQuery, groupItemsQuery, idParam } from '@budgets/contracts/schemas';
 import type {
   BudgetDetail,
   BudgetListQuery,

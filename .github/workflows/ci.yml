@@ -34,6 +34,8 @@ jobs:
       - run: pnpm --filter @budgets/api generate
       - run: pnpm lint
       - run: pnpm typecheck
+      # A tela precisa gerar o build de produção (Vite), não só passar nos tipos.
+      - run: pnpm --filter @budgets/web build
       # Os testes da API sobem um Postgres descartável (Testcontainers) no Docker do runner.
       - run: pnpm test:coverage
 

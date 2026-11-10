@@ -567,8 +567,8 @@ Reproduzir:
 | Tecnologia | Papel | Por quê |
 |---|---|---|
 | TypeScript + Node.js | API, workers, front | Uma linguagem nos dois lados; tipos, contratos e cálculo compartilhados |
-| React + Vite | Tela | ⟨…⟩ |
-| TanStack Query | Estado vindo do servidor no front | ⟨…⟩ |
+| React + Vite | Tela | Aplicação estática que fala direto com a API (sem o front intermediário da legada); o Vite gera arquivos com hash no nome, base para resolver o cache velho depois do deploy |
+| TanStack Query | Estado vindo do servidor no front | Cache em memória, por aba, com chave por versão do grupo (como no `redis-cache`): substitui o `localStorage` da legada, sem chaves órfãs nem dado velho |
 | NestJS (sobre Fastify) | API REST | Módulos e injeção de dependência deixam a API testável por partes; o Nest 12 valida a entrada com os mesmos schemas Zod que a tela vai usar. Fastify pelo logger pino embutido e pelo `inject` (testes sem rede) |
 | PostgreSQL + Prisma | Fonte da verdade | Schema e migrations versionados, tipos gerados a partir do banco; o que o Prisma não modela (`CHECK` com os limites das regras) fica na migration ([ADR 0005](docs/adr/0005-modelo-de-dados-da-versao-nova.md)) |
 | Redis | Rascunhos de edição (que seguram o bloqueio), cache e filas (BullMQ), em duas instâncias: `redis-data` e `redis-cache` | Duas instâncias porque cache pode ser despejado e rascunho não: LRU sem persistência num, `noeviction` + AOF no outro |
@@ -609,6 +609,7 @@ pnpm test
 | `pnpm v2:api` | Sobe a API nova em `http://127.0.0.1:3000/api` (porta em `API_PORT`), com logs de uma linha por requisição e o `x-request-id` na resposta |
 | `pnpm v2:worker` | Sobe o worker (processo separado da API): outbox → fila → busca, e a conferência de drift agendada (03:00) |
 | `pnpm v2:reindex` | Reconstrói os índices do Elasticsearch a partir do Postgres, sem tirar a busca do ar (o `v2:seed` já faz isso) |
+| `pnpm v2:web` | Sobe a tela nova em `http://127.0.0.1:5173` (precisa da API no ar; o Vite repassa `/api` para ela) |
 | `pnpm v2:check` | Conferência de drift: recalcula do zero cada total guardado e aponta divergências |
 | `pnpm v2:seed full` | Aplica as migrations (Prisma) e carrega os dados no banco da versão nova (`budgets_v2`); relê tudo pelo Prisma e confere cada total com o gerador |
 
@@ -625,7 +626,7 @@ pnpm test
 
 ```
 apps/api              API NestJS; schema e migrations do Prisma em apps/api/prisma
-apps/web              front React + Vite
+apps/web              tela React + Vite + TanStack Query
 packages/money        dinheiro em inteiros
 packages/budget-calc  regras de cálculo do orçamento
 packages/contracts    contratos da API compartilhados
@@ -671,6 +672,8 @@ docs/adr/             decisões de arquitetura
 - [x] API nova: cache no `redis-cache` com a versão na chave, métricas e conferência de drift
 - [x] API nova: outbox, fila (BullMQ) e worker separado, com a conferência de drift agendada
 - [x] API nova: Elasticsearch na listagem e no autocomplete (acentos, erro de digitação, prefixo), com o Postgres de reserva
-- [ ] Front (React + Vite + TanStack Query)
+- [x] Tela nova (React + Vite + TanStack Query): login, listagem com busca, orçamento com grupos carregados por página e aviso de quem está editando
+- [ ] Tela nova: edição em rascunho
+- [ ] Tela nova: deploy sem cache velho e testes no navegador
 - [ ] Ambiente “VPS” e benchmark
 - [ ] README preenchido com os números

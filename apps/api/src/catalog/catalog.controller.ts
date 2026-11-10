@@ -1,5 +1,5 @@
 import { Controller, Get, Inject, Query } from '@nestjs/common';
-import { productSearchQuery } from '@budgets/contracts';
+import { productSearchQuery } from '@budgets/contracts/schemas';
 import type { Product, ProductSearchQuery, Ref, Unit } from '@budgets/contracts';
 
 import { Database } from '../db/database.js';
