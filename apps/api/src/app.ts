@@ -7,15 +7,25 @@ import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Logger, LoggerModule } from 'nestjs-pino';
 
+import { UserGuard } from './auth/current-user.js';
 import { BudgetsController } from './budgets/budgets.controller.js';
 import { BudgetsService } from './budgets/budgets.service.js';
 import { CatalogController } from './catalog/catalog.controller.js';
 import { Database, DATABASE_URL } from './db/database.js';
+import { DraftSaver } from './drafts/draft-saver.js';
+import { DRAFT_TTL_MS, DraftStore } from './drafts/draft.store.js';
+import { DraftsController } from './drafts/drafts.controller.js';
+import { DraftsService } from './drafts/drafts.service.js';
 import { ApiErrorFilter } from './http/api-error.filter.js';
 import { REQUEST_ID_HEADER, requestId } from './http/request-id.js';
+import { REDIS_DATA_URL, RedisData } from './redis/redis.js';
 
 export interface AppConfig {
   databaseUrl: string;
+  /** `redis-data`: rascunhos de edição. */
+  redisDataUrl: string;
+  /** Validade do rascunho (e do bloqueio) sem nova edição: 30 min. */
+  draftTtlMs: number;
   /** `silent` nos testes; `info` em produção. */
   logLevel: string;
   /** Logs legíveis no terminal (dev); JSON de uma linha nos demais casos. */
@@ -47,8 +57,19 @@ function appModule(config: AppConfig): DynamicModule {
         },
       }),
     ],
-    controllers: [BudgetsController, CatalogController],
-    providers: [{ provide: DATABASE_URL, useValue: config.databaseUrl }, Database, BudgetsService],
+    controllers: [BudgetsController, CatalogController, DraftsController],
+    providers: [
+      { provide: DATABASE_URL, useValue: config.databaseUrl },
+      { provide: REDIS_DATA_URL, useValue: config.redisDataUrl },
+      { provide: DRAFT_TTL_MS, useValue: config.draftTtlMs },
+      Database,
+      RedisData,
+      DraftStore,
+      DraftSaver,
+      DraftsService,
+      BudgetsService,
+      UserGuard,
+    ],
   };
 }
 

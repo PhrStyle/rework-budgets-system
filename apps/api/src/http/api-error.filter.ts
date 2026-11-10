@@ -24,6 +24,7 @@ export class ApiErrorFilter implements ExceptionFilter {
           ? (response.message as string | string[])
           : exception.message;
       body = { statusCode: exception.getStatus(), message, requestId: request.id };
+      if (typeof response === 'object' && 'details' in response) body.details = response.details;
     } else {
       this.logger.error(exception);
       body = {

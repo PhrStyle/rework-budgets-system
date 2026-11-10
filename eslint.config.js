@@ -36,6 +36,11 @@ export default tseslint.config(
     },
   },
   {
+    // Nos testes, um auxiliar genérico dá tipo ao JSON da resposta (`res.json<T>()`).
+    files: ['**/*.test.ts'],
+    rules: { '@typescript-eslint/no-unnecessary-type-parameters': 'off' },
+  },
+  {
     files: ['**/*.js'],
     ...tseslint.configs.disableTypeChecked,
   },

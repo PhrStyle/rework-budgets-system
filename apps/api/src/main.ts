@@ -3,6 +3,8 @@ import { databaseUrl } from './db/url.js';
 
 const app = await createApp({
   databaseUrl: databaseUrl(),
+  redisDataUrl: `redis://127.0.0.1:${process.env.REDIS_DATA_PORT ?? '6380'}`,
+  draftTtlMs: 30 * 60 * 1000,
   logLevel: process.env.LOG_LEVEL ?? 'info',
   prettyLogs: process.env.NODE_ENV !== 'production',
 });

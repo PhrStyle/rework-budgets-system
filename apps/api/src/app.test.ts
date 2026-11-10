@@ -7,31 +7,25 @@ import type {
   Product,
   Ref,
 } from '@budgets/contracts';
-import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { createApp } from './app.js';
-import { startTestDatabase } from './testing/database.js';
+import { startTestApp } from './testing/app.js';
+import type { TestApp } from './testing/app.js';
 import type { TestDatabase } from './testing/database.js';
 
+let env: TestApp;
 let db: TestDatabase;
-let app: NestFastifyApplication;
 
 beforeAll(async () => {
-  db = await startTestDatabase();
-  app = await createApp({ databaseUrl: db.url, logLevel: 'silent', prettyLogs: false });
-  await app.init();
-  await app.getHttpAdapter().getInstance().ready();
+  env = await startTestApp();
+  db = env.db;
 }, 180_000);
 
-afterAll(async () => {
-  await app.close();
-  await db.stop();
-});
+afterAll(() => env.stop());
 
 /** Requisição em memória (Fastify inject): passa por rotas, validação, filtros e logs, sem rede. */
 function get(url: string, headers: Record<string, string> = {}) {
-  return app.inject({ method: 'GET', url: `/api${url}`, headers });
+  return env.request('GET', url, { headers });
 }
 
 describe('listagem', () => {
