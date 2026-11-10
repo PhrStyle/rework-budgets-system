@@ -56,7 +56,7 @@
 | **Infra original** | VPS Contabo, US Central; usuários no Brasil |
 | **Meu papel** | Engenheiro de software, único desenvolvedor do sistema |
 
-Assumi o sistema depois de **dois anos** de desenvolvimento por outra pessoa, já com várias decisões de arquitetura e de lógica que causavam os problemas abaixo. Este repositório é o registro de como eu os corrigiria.
+Assumi o sistema depois de **dois anos** de desenvolvimento por outra pessoa, já **em produção**, com o cliente usando no dia a dia e várias decisões de arquitetura e de lógica que causavam os problemas abaixo. Este repositório é o registro de como eu os corrigiria sem as restrições da época.
 
 > O sistema antigo é reproduzido aqui **de forma genérica**, com dados fictícios. Não é o código original.
 
@@ -65,6 +65,14 @@ Assumi o sistema depois de **dois anos** de desenvolvimento por outra pessoa, j�
 ## Como o sistema chegou aqui
 
 As regras do sistema antigo são confusas, e **essa confusão é o problema**. Ninguém projetaria de propósito um orçamento calculado em parte no navegador e em parte no servidor, salvo inteiro a cada 5 minutos e recarregado a cada mudança de margem. Ele chegou a isso aos poucos: cada decisão fazia sentido para resolver o sintoma da anterior, e criava o próximo.
+
+**Por que paliativos, e não a solução certa?** Porque as condições não permitiam uma refatoração profunda:
+
+- **O sistema estava em produção**, usado pelo cliente todos os dias: qualquer mudança grande precisava acontecer sem parar o trabalho de ninguém.
+- **O banco tinha dois anos de registros.** Mudar o modelo (por exemplo, trocar `decimal` por inteiros ou tirar o cálculo do navegador) exigiria migrar e validar dados reais de clientes, com o risco de alterar valores de orçamentos já enviados.
+- **O cliente continuava pedindo funcionalidades novas**, ao mesmo tempo em que precisava que as funções problemáticas voltassem a funcionar corretamente.
+
+Com produção, dados históricos e funcionalidades novas disputando o mesmo tempo, o caminho viável era corrigir o sintoma visível dentro do sistema existente. Cada correção pontual adiava a solução adequada e somava mais uma camada à cadeia abaixo.
 
 ```mermaid
 flowchart TD
@@ -79,7 +87,7 @@ flowchart TD
 
 Os números são os dos [problemas](#problemas-e-soluções). Os demais (3, 5, 6, 7, 9 e 13) não nascem dessa cadeia, mas somavam a ela: busca lenta, totais de orçamentos vinculados defasados, um ambiente de produção muito mais lento que o de desenvolvimento, uma tela difícil de manter, deploys que quebravam o front em cache e um caminho dobrado entre o navegador e a API.
 
-A versão nova não corrige um paliativo de cada vez: **ela desfaz a cadeia na origem**. O cálculo fica num lugar só (o servidor, com inteiros), a edição vai para um rascunho no servidor, e salvar grava só o que mudou. Sem a primeira caixa, as outras deixam de ser necessárias.
+Este repositório faz o que não era possível na época: parte do zero, sem dados históricos a preservar nem funcionalidades novas disputando o prazo, para mostrar a solução adequada de cada problema. A versão nova não corrige um paliativo de cada vez: **ela desfaz a cadeia na origem**. O cálculo fica num lugar só (o servidor, com inteiros), a edição vai para um rascunho no servidor, e salvar grava só o que mudou. Sem a primeira caixa, as outras deixam de ser necessárias.
 
 ---
 
