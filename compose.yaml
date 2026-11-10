@@ -1,0 +1,100 @@
+# Infra local: Postgres (2 bancos), Redis de cache, Redis de filas e Elasticsearch.
+# Portas só em 127.0.0.1: acessíveis desta máquina, não da rede.
+name: budgets
+
+services:
+  postgres:
+    image: postgres:18.6-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: postgres
+    ports:
+      - '127.0.0.1:${POSTGRES_PORT:-54320}:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql
+      # Cria budgets_legacy e budgets_v2 na primeira inicialização.
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER}']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Cache: só cópias reconstruíveis a partir do Postgres; pode perder tudo.
+  # allkeys-lru: quando enche, apaga a chave usada há mais tempo. Sem persistência.
+  redis-cache:
+    image: redis:8.8.4-alpine
+    command:
+      - redis-server
+      - --maxmemory
+      - 256mb
+      - --maxmemory-policy
+      - allkeys-lru
+      - --save
+      - ''
+      - --appendonly
+      - 'no'
+    ports:
+      - '127.0.0.1:${REDIS_CACHE_PORT:-6379}:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Dados que NÃO podem sumir: rascunhos de edição (trabalho não salvo do usuário) e filas (BullMQ).
+  # Não se reconstroem a partir do Postgres, então:
+  # noeviction: quando enche, recusa a escrita em vez de apagar. AOF com fsync a cada segundo.
+  redis-data:
+    image: redis:8.8.4-alpine
+    command:
+      - redis-server
+      - --maxmemory
+      - 256mb
+      - --maxmemory-policy
+      - noeviction
+      - --appendonly
+      - 'yes'
+      - --appendfsync
+      - everysec
+      - --save
+      - ''
+    ports:
+      - '127.0.0.1:${REDIS_DATA_PORT:-6380}:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  elasticsearch:
+    image: elasticsearch:9.5.5
+    environment:
+      discovery.type: single-node
+      # Só local. Em produção a segurança fica ligada.
+      xpack.security.enabled: 'false'
+      # Sem isso a JVM reserva uma fatia grande da RAM da máquina.
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+      # Limites de disco em espaço livre absoluto, não em %: num disco grande e quase cheio,
+      # "90% usado" ainda pode ser dezenas de GB livres. Abaixo de 3 GB livres, para de alocar.
+      cluster.routing.allocation.disk.watermark.low: 5gb
+      cluster.routing.allocation.disk.watermark.high: 3gb
+      cluster.routing.allocation.disk.watermark.flood_stage: 1gb
+    mem_limit: 1g
+    ports:
+      - '127.0.0.1:${ELASTICSEARCH_PORT:-9200}:9200'
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -fs http://localhost:9200/_cluster/health || exit 1']
+      interval: 5s
+      timeout: 5s
+      retries: 40
+
+volumes:
+  postgres-data:
+  redis-data:
+  elasticsearch-data:
