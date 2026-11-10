@@ -314,7 +314,7 @@ Uma edição vai só para o rascunho do usuário no `redis-data`, e a API devolv
 | Do salvar até aparecer na busca | imediato (busca direto no banco) | **~1 s** (mediana de 7) |
 
 - **Trade-offs:** Nesta escala (3.201 orçamentos, 5.500 produtos), **a velocidade empata**, e a listagem sem busca é até mais lenta; o ganho é o que a busca **acha**. Em troca, a busca é eventual: ~1 s entre salvar e aparecer, quase todo o *refresh* de 1 s do Elasticsearch, mais o relay (até 500 ms); o detalhe do orçamento continua lendo do Postgres e do cache, sempre exato. É mais um serviço para operar (memória, disco, reindexação).
-- **Onde ver:** legada: [`OrcamentosController.Listar`](legacy/src/Budgets.Legacy.Api/Controllers/OrcamentosController.cs) e [`CatalogoController.Produtos`](legacy/src/Budgets.Legacy.Api/Controllers/CatalogoController.cs) (`ILIKE '%termo%'`) · nova: índices e analisadores em [`indices.ts`](apps/api/src/search/indices.ts), consultas em [`search.service.ts`](apps/api/src/search/search.service.ts), indexação em [`elastic-indexer.ts`](apps/api/src/search/elastic-indexer.ts), outbox e relay em [`relay.ts`](apps/api/src/worker/relay.ts), worker em [`worker.ts`](apps/api/src/worker/worker.ts); testes em [`search.test.ts`](apps/api/src/search/search.test.ts) (cada caso compara com o `ILIKE` da legada) e [`worker.test.ts`](apps/api/src/worker/worker.test.ts)
+- **Onde ver:** legada: [`OrcamentosController.Listar`](legacy/src/Budgets.Legacy.Api/Controllers/OrcamentosController.cs) e [`CatalogoController.Produtos`](legacy/src/Budgets.Legacy.Api/Controllers/CatalogoController.cs) (`ILIKE '%termo%'`) · nova: índices e analisadores em [`indices.ts`](apps/api/src/search/indices.ts), consultas em [`search.service.ts`](apps/api/src/search/search.service.ts), indexação em [`elastic-indexer.ts`](apps/api/src/search/elastic-indexer.ts), outbox e relay em [`relay.ts`](apps/api/src/worker/relay.ts), worker em [`worker.ts`](apps/api/src/worker/worker.ts); testes em [`search.test.ts`](apps/api/src/search/search.test.ts) (cada caso compara com o `ILIKE` da legada) e [`worker.test.ts`](apps/api/src/worker/worker.test.ts) · decisões: [ADR 0006](docs/adr/0006-outbox-e-fila.md) (outbox e fila) e [ADR 0007](docs/adr/0007-elasticsearch-com-reserva.md) (Elasticsearch com reserva)
 
 ---
 
@@ -388,6 +388,7 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 | Legada | ~320 ms | ~1.136 ms | 3,5x: 16 idas ao servidor e 152 KB de upload |
 | Nova | ~19 ms | ~170 ms | 1 ida |
 
+- **Trade-offs:** O ambiente emulado não é a VPS: a rede é suposta e a máquina é outra. Ele serve para comparar as duas versões do mesmo jeito, não para prever os números exatos de produção. E é mais uma configuração para manter em dia junto com o código.
 - **Onde ver:** [`compose.vps.yaml`](compose.vps.yaml) · [`bench/vps/rede.sh`](bench/vps/rede.sh) · [`bench/k6/`](bench/k6/) · a tabela completa em [Antiga × nova](#antiga--nova-números)
 
 ---
@@ -412,7 +413,7 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 | Mover um item | DOM, e o orçamento inteiro reenviado ao salvar | 1 operação no rascunho |
 
 - **Trade-offs:** Cada edição é uma ida ao servidor: ~9 ms na máquina local e ~157 ms com a rede da VPS emulada (ver [Antiga × nova](#antiga--nova-números)). Sem atualização otimista, de propósito: mostrar um valor calculado no navegador antes da resposta recriaria a prévia que diverge do salvo.
-- **Onde ver:** legada: `recalcular()` em [`orcamento.js`](legacy/src/Budgets.Legacy.Web/wwwroot/js/orcamento.js) · nova: [`GroupCard.tsx`](apps/web/src/components/GroupCard.tsx) (linhas editáveis, inserir, arrastar), [`Field.tsx`](apps/web/src/components/Field.tsx) (grava ao sair, valida com `packages/money`), [`draft.ts`](apps/web/src/api/draft.ts) (operações, ordem das respostas, abas)
+- **Onde ver:** legada: `recalcular()` em [`orcamento.js`](legacy/src/Budgets.Legacy.Web/wwwroot/js/orcamento.js) · nova: [`GroupCard.tsx`](apps/web/src/components/GroupCard.tsx) (linhas editáveis, inserir, arrastar), [`Field.tsx`](apps/web/src/components/Field.tsx) (grava ao sair, valida com `packages/money`), [`draft.ts`](apps/web/src/api/draft.ts) (operações, ordem das respostas, abas) · decisão: [ADR 0008](docs/adr/0008-tela-sem-calculo.md)
 
 ---
 
@@ -434,6 +435,7 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 | Cobertura de linhas pelo Vitest | nenhum teste no front | `money` e `budget-calc` 100% · API 85% · tela 29% (as páginas são cobertas pelo Playwright, fora desta medição) |
 | Testes automatizados | 0 no front | 147 (Vitest: 134 em Node, 13 na tela) + 3 no navegador (Playwright) + 22 na legada |
 
+- **Trade-offs:** Os testes de integração sobem Postgres, Redis e Elasticsearch de verdade (Testcontainers), o que é mais lento que simular com mocks e exige Docker no CI, em troca de testar o que roda em produção. A cobertura da tela pelo Vitest é baixa (29%): as páginas dependem dos testes no navegador, que são poucos (3).
 - **Onde ver:** [`packages/money`](packages/money/src) · [`packages/budget-calc`](packages/budget-calc/src) · casos compartilhados com a legada em [`fixtures/budget-cases.json`](fixtures/budget-cases.json)
 
 ---
@@ -459,7 +461,7 @@ itemTotal(cents(123456), qty(300), bp(750)); // R$ 1.234,56 × 3 un com 7,5% →
 | Erros depois do deploy | só quando o usuário reclamava | no Sentry, com a versão do build em cada erro: dá para ver “começou na versão X” (conferido com o GlitchTip local; a contagem real depende de usuários reais) |
 
 - **Trade-offs:** Uma SPA separa front e back em dois artefatos, o que **aumenta** o risco de descompasso de versões se nada for feito; a mitigação precisa existir desde o primeiro deploy. O aviso depende de o usuário clicar: uma aba esquecida aberta continua na versão antiga até lá (ela só não quebra se a API se mantiver compatível). As mesmas regras de cache valem no `vite preview` e no nginx do ambiente “VPS” ([`nginx.conf`](infra/web/nginx.conf)).
-- **Onde ver:** legada: [`Program.cs` do front](legacy/src/Budgets.Legacy.Web/Program.cs) (scripts com cache de 7 dias) e a tag do script em [`Orcamento.cshtml`](legacy/src/Budgets.Legacy.Web/Pages/Orcamento.cshtml), sem versão no nome. O próprio ASP.NET já oferecia a correção (`asp-append-version`), que o sistema não usava · nova: [`vite.config.ts`](apps/web/vite.config.ts) (versão, `version.json` e cabeçalhos), [`version.ts`](apps/web/src/version.ts) e [`NewVersion.tsx`](apps/web/src/components/NewVersion.tsx); testes em [`editar.spec.ts`](apps/web/e2e/editar.spec.ts) (cabeçalhos no navegador) e [`NewVersion.test.tsx`](apps/web/src/components/NewVersion.test.tsx)
+- **Onde ver:** legada: [`Program.cs` do front](legacy/src/Budgets.Legacy.Web/Program.cs) (scripts com cache de 7 dias) e a tag do script em [`Orcamento.cshtml`](legacy/src/Budgets.Legacy.Web/Pages/Orcamento.cshtml), sem versão no nome. O próprio ASP.NET já oferecia a correção (`asp-append-version`), que o sistema não usava · nova: [`vite.config.ts`](apps/web/vite.config.ts) (versão, `version.json` e cabeçalhos), [`version.ts`](apps/web/src/version.ts) e [`NewVersion.tsx`](apps/web/src/components/NewVersion.tsx); testes em [`editar.spec.ts`](apps/web/e2e/editar.spec.ts) (cabeçalhos no navegador) e [`NewVersion.test.tsx`](apps/web/src/components/NewVersion.test.tsx) · rastreamento de erros e métricas: [ADR 0009](docs/adr/0009-observabilidade.md)
 
 ---
 
