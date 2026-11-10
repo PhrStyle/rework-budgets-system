@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.11" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
     <PackageReference Include="Testcontainers.PostgreSql" Version="4.16.0" />
     <PackageReference Include="xunit" Version="2.5.3" />
@@ -24,6 +25,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Budgets.Legacy.Data\Budgets.Legacy.Data.csproj" />
     <ProjectReference Include="..\..\src\Budgets.Legacy.Seed\Budgets.Legacy.Seed.csproj" />
+    <ProjectReference Include="..\..\src\Budgets.Legacy.Api\Budgets.Legacy.Api.csproj" />
   </ItemGroup>
 
 </Project>

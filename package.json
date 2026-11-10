@@ -22,7 +22,8 @@
     "seed:generate": "pnpm --filter @budgets/seed generate",
     "legacy:seed": "set -a && . ./.env && set +a && dotnet run --project legacy/src/Budgets.Legacy.Seed -c Release --",
     "legacy:test": "dotnet test legacy/Budgets.Legacy.sln",
-    "legacy:format": "dotnet format legacy/Budgets.Legacy.sln"
+    "legacy:format": "dotnet format legacy/Budgets.Legacy.sln",
+    "legacy:api": "set -a && . ./.env && set +a && dotnet run --project legacy/src/Budgets.Legacy.Api --urls http://127.0.0.1:5080"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
