@@ -9,6 +9,13 @@ type CacheResult = 'hit' | 'miss' | 'error';
 @Injectable()
 export class Metrics {
   private readonly cacheCounts = new Map<string, number>();
+  private readonly searchCounts = new Map<string, number>();
+
+  /** Por qual motor cada busca foi atendida (o Postgres só quando o Elasticsearch falha). */
+  search(name: string, engine: 'elasticsearch' | 'postgres_fallback'): void {
+    const key = `${name}|${engine}`;
+    this.searchCounts.set(key, (this.searchCounts.get(key) ?? 0) + 1);
+  }
 
   cache(name: string, result: CacheResult): void {
     const key = `${name}|${result}`;
@@ -27,6 +34,14 @@ export class Metrics {
     for (const [key, count] of [...this.cacheCounts].sort()) {
       const [name, result] = key.split('|');
       lines.push(`budgets_cache_requests_total{cache="${name}",result="${result}"} ${count}`);
+    }
+    lines.push(
+      '# HELP budgets_search_requests_total Buscas, por tipo e por motor que respondeu.',
+      '# TYPE budgets_search_requests_total counter',
+    );
+    for (const [key, count] of [...this.searchCounts].sort()) {
+      const [name, engine] = key.split('|');
+      lines.push(`budgets_search_requests_total{search="${name}",engine="${engine}"} ${count}`);
     }
     return lines.join('\n') + '\n';
   }

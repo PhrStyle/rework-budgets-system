@@ -111,8 +111,12 @@ export async function loadDataset(pool: Pool, dataset: Dataset): Promise<LoadSum
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // O outbox perde as linhas, mas NÃO a numeração: o id dele é a chave que a fila usa para não
+    // processar o mesmo aviso duas vezes (`outbox-<id>`). Reiniciar em 1 faria avisos novos terem
+    // o id de tarefas antigas ainda guardadas na fila, que os descartaria como repetidos.
+    await client.query('TRUNCATE outbox CONTINUE IDENTITY');
     await client.query(
-      'TRUNCATE outbox, items, groups, budgets, products, clients, sellers RESTART IDENTITY CASCADE',
+      'TRUNCATE items, groups, budgets, products, clients, sellers RESTART IDENTITY CASCADE',
     );
     // Uma FK confere cada linha inserida (85% do tempo da carga, medido). Recriada no fim, valida
     // a tabela inteira de uma vez. Tudo na mesma transação: ninguém vê o banco sem as FKs.

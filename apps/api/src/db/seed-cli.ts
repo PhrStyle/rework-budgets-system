@@ -5,8 +5,11 @@ import { Redis } from 'ioredis';
 import pg from 'pg';
 
 import { loadDataset, readDataset } from './load.js';
+import { createElastic } from '../search/elastic.js';
+import { reindex } from '../search/reindex.js';
+import type { PrismaClient } from '../generated/prisma/client.js';
 import { createPrisma } from './prisma.js';
-import { databaseUrl } from './url.js';
+import { databaseUrl, elasticsearchUrl } from './url.js';
 import { verifyTotals } from './verify.js';
 
 // Uso: pnpm v2:seed [small|full]  (as migrations rodam antes, no script da raiz)
@@ -24,6 +27,7 @@ const prisma = createPrisma();
 try {
   const loaded = await loadDataset(pool, dataset);
   await flushCache();
+  await reindexSearch(prisma);
   console.log(
     `carregado (${profile}): ${loaded.budgets} orçamentos, ${loaded.groups} grupos, ` +
       `${loaded.items} itens em ${loaded.ms} ms`,
@@ -64,5 +68,20 @@ async function flushCache(): Promise<void> {
     console.warn('redis-cache fora do ar: nada a limpar');
   } finally {
     redis.disconnect();
+  }
+}
+
+/** Os ids voltaram a ser os do gerador: a busca precisa ser reconstruída. Sem o Elasticsearch, avisa. */
+async function reindexSearch(prisma: PrismaClient): Promise<void> {
+  const es = createElastic(elasticsearchUrl(), 60_000);
+  try {
+    const r = await reindex(es, prisma);
+    console.log(`busca reindexada: ${r.budgets} orçamentos e ${r.products} produtos em ${r.ms} ms`);
+  } catch (error) {
+    console.warn(
+      `Elasticsearch indisponível, busca não reindexada (rode pnpm v2:reindex depois): ${String(error)}`,
+    );
+  } finally {
+    await es.close();
   }
 }

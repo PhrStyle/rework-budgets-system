@@ -279,16 +279,31 @@ Uma edição vai só para o rascunho do usuário no Redis, e a API devolve os to
 
 ### 3. Busca e filtro de orçamentos
 
-- **Problema:** ⟨como era a busca⟩
-- **Impacto:** ⟨…⟩
+- **Problema:** A listagem e o autocomplete de produtos buscavam com `LIKE '%termo%'` (`ILIKE` no Postgres) direto no banco.
+- **Impacto:** O `LIKE` compara letra por letra: sem o acento exato, não acha nada (“farmacia” não acha “Farmácia”), não tolera erro de digitação, não ordena por relevância, e o `%` no início impede o uso de índice comum.
 - **Solução:**
-  - **Índice atualizado por fila, sem perder nenhuma alteração:** o salvar grava um aviso numa tabela `outbox` **na mesma transação** da mudança; um relay leva os avisos para a fila (BullMQ, no `redis-data`) e um worker separado da API atualiza o índice, tentando de novo com espera crescente se o destino estiver fora do ar. Se o worker cair no meio de uma tarefa, a trava dela expira e outro worker a retoma. ⟨Destino Elasticsearch: etapa 7b⟩
-  - ⟨Autocomplete de produtos (edge n-gram + fuzzy)⟩
+  - **Elasticsearch** para a listagem de orçamentos e o autocomplete de produtos, com um analisador que tira maiúsculas, acentos e cedilha (`asciifolding`), tolerância a erro de digitação (`fuzziness`) e prefixos indexados (*edge n-gram*) para o autocomplete enquanto se digita. O número do orçamento, se digitado, vem primeiro.
+  - **Índice atualizado por fila, sem perder nenhuma alteração:** o salvar grava um aviso numa tabela `outbox` **na mesma transação** da mudança; um relay leva os avisos para a fila (BullMQ, no `redis-data`) e um worker separado da API atualiza o índice, tentando de novo com espera crescente se o Elasticsearch estiver fora do ar. Se o worker cair no meio de uma tarefa, a trava dela expira e outro worker a retoma.
+  - **Versão externa no índice:** a versão do documento é a hora da última gravação no Postgres; uma tarefa atrasada não sobrescreve um dado mais novo.
+  - **Reindexar sem tirar a busca do ar** (`pnpm v2:reindex`): índice novo com a data no nome, carga em lote e troca do alias numa operação só.
+  - **Elasticsearch fora do ar:** a listagem e o autocomplete caem para o `ILIKE` do Postgres, com aviso no log e métrica; a busca piora, mas a tela não quebra.
 
-- **Resultado:**
+- **Resultado** (mesma máquina, dados completos, só a API):
 
-| Métrica | Antes | Depois |
+| Busca | Antes (`ILIKE`) | Depois (Elasticsearch) |
 |---|---|---|
+| Produtos: “camera”, “camer”, “licenca”, “instalacao”, “camera ip” | 0 resultados | 10 (o limite da tela) |
+| Produtos: “cmaera” (erro de digitação) | 0 | 10 |
+| Orçamentos: “farmacia” · “industria” · “sao lucas” | 0 · 0 · 0 | 182 · 260 · 81 |
+| Orçamentos: “hospital” (sem acento envolvido) | 226 | 226 |
+| Tempo de uma busca (mediana de 9) | ~7 a 12 ms | ~6 a 13 ms |
+| Listagem sem busca, 1ª página | ~4,4 ms | ~8,7 ms |
+| Do salvar até aparecer na busca | imediato (busca direto no banco) | **~1 s** (mediana de 7) |
+
+- **Trade-offs:** Nesta escala (3.201 orçamentos, 5.500 produtos), **a velocidade empata**, e a listagem sem busca é até mais lenta; o ganho é o que a busca **acha**. Em troca, a busca é eventual: ~1 s entre salvar e aparecer, quase todo o *refresh* de 1 s do Elasticsearch, mais o relay (até 500 ms); o detalhe do orçamento continua lendo do Postgres e do cache, sempre exato. É mais um serviço para operar (memória, disco, reindexação).
+- **Onde ver:** legada: [`OrcamentosController.Listar`](legacy/src/Budgets.Legacy.Api/Controllers/OrcamentosController.cs) e [`CatalogoController.Produtos`](legacy/src/Budgets.Legacy.Api/Controllers/CatalogoController.cs) (`ILIKE '%termo%'`) · nova: índices e analisadores em [`indices.ts`](apps/api/src/search/indices.ts), consultas em [`search.service.ts`](apps/api/src/search/search.service.ts), indexação em [`elastic-indexer.ts`](apps/api/src/search/elastic-indexer.ts), outbox e relay em [`relay.ts`](apps/api/src/worker/relay.ts), worker em [`worker.ts`](apps/api/src/worker/worker.ts); testes em [`search.test.ts`](apps/api/src/search/search.test.ts) (cada caso compara com o `ILIKE` da legada) e [`worker.test.ts`](apps/api/src/worker/worker.test.ts)
+
+---|---|---|
 | Busca p95 | — | — |
 | Autocomplete p95 | — | — |
 
@@ -557,7 +572,7 @@ Reproduzir:
 | NestJS (sobre Fastify) | API REST | Módulos e injeção de dependência deixam a API testável por partes; o Nest 12 valida a entrada com os mesmos schemas Zod que a tela vai usar. Fastify pelo logger pino embutido e pelo `inject` (testes sem rede) |
 | PostgreSQL + Prisma | Fonte da verdade | Schema e migrations versionados, tipos gerados a partir do banco; o que o Prisma não modela (`CHECK` com os limites das regras) fica na migration ([ADR 0005](docs/adr/0005-modelo-de-dados-da-versao-nova.md)) |
 | Redis | Rascunhos de edição (que seguram o bloqueio), cache e filas (BullMQ), em duas instâncias: `redis-data` e `redis-cache` | Duas instâncias porque cache pode ser despejado e rascunho não: LRU sem persistência num, `noeviction` + AOF no outro |
-| Elasticsearch | Listagem, filtros e autocomplete | ⟨…⟩ |
+| Elasticsearch | Listagem, filtros e autocomplete | Busca que ignora acentos, tolera erro de digitação e acha por prefixo, o que o `LIKE` não faz; alimentado por fila a partir de um outbox |
 | Vitest | Testes unitários e de integração | ⟨…⟩ |
 | Docker Compose | Ambiente local e ambiente “VPS” | ⟨…⟩ |
 | Toxiproxy · k6 | Emular rede de produção e medir | ⟨…⟩ |
@@ -593,6 +608,7 @@ pnpm test
 | `pnpm legacy:test` | Testes da legada (xUnit + Testcontainers; precisa de Docker) |
 | `pnpm v2:api` | Sobe a API nova em `http://127.0.0.1:3000/api` (porta em `API_PORT`), com logs de uma linha por requisição e o `x-request-id` na resposta |
 | `pnpm v2:worker` | Sobe o worker (processo separado da API): outbox → fila → busca, e a conferência de drift agendada (03:00) |
+| `pnpm v2:reindex` | Reconstrói os índices do Elasticsearch a partir do Postgres, sem tirar a busca do ar (o `v2:seed` já faz isso) |
 | `pnpm v2:check` | Conferência de drift: recalcula do zero cada total guardado e aponta divergências |
 | `pnpm v2:seed full` | Aplica as migrations (Prisma) e carrega os dados no banco da versão nova (`budgets_v2`); relê tudo pelo Prisma e confere cada total com o gerador |
 
@@ -654,7 +670,7 @@ docs/adr/             decisões de arquitetura
 - [x] API nova: rascunho no Redis (segura o bloqueio), edição por delta e “Salvar alterações” gravando só o changeset
 - [x] API nova: cache no `redis-cache` com a versão na chave, métricas e conferência de drift
 - [x] API nova: outbox, fila (BullMQ) e worker separado, com a conferência de drift agendada
-- [ ] API nova: Elasticsearch (busca e autocomplete)
+- [x] API nova: Elasticsearch na listagem e no autocomplete (acentos, erro de digitação, prefixo), com o Postgres de reserva
 - [ ] Front (React + Vite + TanStack Query)
 - [ ] Ambiente “VPS” e benchmark
 - [ ] README preenchido com os números

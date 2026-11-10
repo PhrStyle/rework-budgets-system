@@ -9,3 +9,7 @@ export function databaseUrl(env: NodeJS.ProcessEnv = process.env): string {
   const port = env.POSTGRES_PORT ?? '54320';
   return `postgresql://${user}:${password}@127.0.0.1:${port}/budgets_v2`;
 }
+
+export function elasticsearchUrl(env: NodeJS.ProcessEnv = process.env): string {
+  return env.ELASTICSEARCH_URL ?? `http://127.0.0.1:${env.ELASTICSEARCH_PORT ?? '9200'}`;
+}

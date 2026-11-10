@@ -4,6 +4,7 @@ import type { PrismaClient } from '../generated/prisma/client.js';
 import { startTestDatabase } from '../testing/database.js';
 import type { TestDatabase } from '../testing/database.js';
 import { createPrisma } from './prisma.js';
+import { loadDataset } from './load.js';
 import { verifyTotals } from './verify.js';
 
 let db: TestDatabase;
@@ -70,6 +71,16 @@ describe('carga do gerador no banco da versão nova', () => {
     await prisma.budget.delete({ where: { id: created.id } });
 
     expect(created.id).toBeGreaterThan(max._max.id ?? Infinity);
+  });
+
+  it('recarregar os dados não reinicia a numeração do outbox (é a chave anti-repetição da fila)', async () => {
+    const first = await prisma.outboxEvent.create({ data: { topic: 'teste', aggregateId: 1 } });
+
+    await loadDataset(db.pool, db.dataset);
+    const second = await prisma.outboxEvent.create({ data: { topic: 'teste', aggregateId: 1 } });
+
+    expect(second.id).toBeGreaterThan(first.id);
+    await prisma.outboxEvent.deleteMany({ where: { topic: 'teste' } });
   });
 
   it.each([
