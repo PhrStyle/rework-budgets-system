@@ -123,3 +123,18 @@ model Item {
   @@index([productId])
   @@map("items")
 }
+
+/// Outbox: "algo mudou e o resto do sistema precisa saber". Gravado na mesma transação da
+/// mudança; um relay leva cada linha para a fila (BullMQ) e marca `publishedAt`. Assim nenhuma
+/// alteração salva fica fora da busca, mesmo que o processo caia entre o commit e a fila.
+model OutboxEvent {
+  id          BigInt    @id @default(autoincrement())
+  /// Ex.: budget.changed
+  topic       String
+  aggregateId Int       @map("aggregate_id")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  publishedAt DateTime? @map("published_at") @db.Timestamptz(3)
+
+  @@index([publishedAt, id])
+  @@map("outbox")
+}

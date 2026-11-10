@@ -112,7 +112,7 @@ export async function loadDataset(pool: Pool, dataset: Dataset): Promise<LoadSum
   try {
     await client.query('BEGIN');
     await client.query(
-      'TRUNCATE items, groups, budgets, products, clients, sellers RESTART IDENTITY CASCADE',
+      'TRUNCATE outbox, items, groups, budgets, products, clients, sellers RESTART IDENTITY CASCADE',
     );
     // Uma FK confere cada linha inserida (85% do tempo da carga, medido). Recriada no fim, valida
     // a tabela inteira de uma vez. Tudo na mesma transação: ninguém vê o banco sem as FKs.

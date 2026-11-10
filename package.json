@@ -28,6 +28,7 @@
     "v2:migrate": "set -a && . ./.env && set +a && pnpm --filter @budgets/api exec prisma migrate deploy",
     "v2:seed": "pnpm v2:migrate && set -a && . ./.env && set +a && pnpm --filter @budgets/api seed --",
     "v2:api": "set -a && . ./.env && set +a && pnpm --filter @budgets/api start",
+    "v2:worker": "set -a && . ./.env && set +a && pnpm --filter @budgets/api worker",
     "v2:check": "set -a && . ./.env && set +a && pnpm --filter @budgets/api check"
   },
   "devDependencies": {
